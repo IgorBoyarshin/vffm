@@ -5,4 +5,4 @@ authors = ["Igor Boyarshin <igor.boyarshin@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-termion = "1"
+pancurses = "0.16"
