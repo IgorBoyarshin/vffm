@@ -201,6 +201,13 @@ impl System {
     }
 }
 
+impl Drop for System {
+    fn drop(&mut self) {
+        endwin();
+        println!("Done");
+    }
+}
+
 enum UserInput {
     Quit,
     Left,
@@ -257,10 +264,5 @@ fn main() {
     system.draw();
     // system.set_paint(Paint{fg: Color::Blue, bg: Color::Cyan});
     // system.window.printw("yeap");
-    // system.set_paint(Paint{fg: Color::Red, bg: Color::White});
-    // system.window.printw("nope");
-
-    system.window.refresh();
     system.window.getch();
-    endwin();
 }
