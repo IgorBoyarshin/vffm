@@ -1,7 +1,8 @@
-extern crate pancurses;
+extern crate pancurses;mod coloring;
+use crate::coloring::*;
 
 use std::collections::HashMap;
-use pancurses::{initscr, endwin, Input, noecho};
+// use pancurses::{initscr, endwin, Input, noecho};
 use pancurses::*;
 
 use std::io;
@@ -9,99 +10,95 @@ use std::path::Path;
 use std::fs::{self, DirEntry};
 
 struct Settings {
-    columns_ratio: Vec<u8>,
+    columns_ratio: Vec<u32>,
 }
 
-struct Tab {
-    columns: Vec<Column>,
-}
+// struct Tab {
+//     columns: Vec<Column>,
+// }
 
-struct Column {
+// struct Column {
+//     x_start: Coord,
+//     x_end: Coord,
+//     height: Coord,
+// }
 
-}
+// impl Column {
+//     fn draw(color_system: &mut ColorSystem, window: &Window, paint: Paint) {
+//         color_system.set_paint(&window, paint);
+//         window.mv(0, x);
+//         window.addch(ACS_TTEE());
+//         window.mv(1, x);
+//         window.vline(ACS_VLINE(), self.height-2);
+//         window.mv(self.height-1, x);
+//         window.addch(ACS_BTEE());
+//     }
+// }
 
 
-#[derive(PartialEq, Eq, Hash, Copy, Clone)]
-enum Color {
-    Black,
-    Red,
-    Green,
-    Yellow,
-    Blue,
-    Purple,
-    Cyan,
-    White,
-    RGB(i16, i16, i16),
-}
+// struct Single {
+//     inst: Box<Single>,
+// }
+//
+// impl Single {
+//     fn inst() {
+//         // self.inst
+//     }
+// }
 
-#[derive(PartialEq, Eq, Hash, Copy, Clone)]
-struct Paint {
-    fg: Color,
-    bg: Color,
-}
 
-type ColorComponent = i16;
-type RGB = (ColorComponent, ColorComponent, ColorComponent);
-type ColorId = i16;
-type PaintId = i16;
 type Coord = i32;
 
-fn get_rgb(color: Color) -> RGB {
-    match color {
-        Color::RGB(r, g, b) => (r, g, b),
-        Color::Black => (0, 0, 0),
-        Color::Red => (1000, 0, 0),
-        Color::Green => (0, 1000, 0),
-        Color::Yellow => (1000, 1000, 0),
-        Color::Blue => (0, 0, 1000),
-        Color::Purple => (500, 0, 500),
-        Color::Cyan => (0, 1000, 1000),
-        Color::White => (1000, 1000, 1000),
-    }
-}
-
-enum Attr {
-    Bold, Underlined,
-}
-
-enum Mode {
-    On, Off,
-}
 
 struct System {
     window: Window,
+    // color_system: ColorSystem,
 
-    next_colorid_to_use: ColorId,
-    next_paintid_to_use: PaintId,
-
-    colors: HashMap<Color, ColorId>,
-    paints: HashMap<Paint, PaintId>,
-    height: i32,
-    width: i32,
+    height: Coord,
+    width: Coord,
 
     primary_paint: Paint,
+    columns_count: u32,
+    columns_coord: Vec<(Coord, Coord)>,
 }
 
 impl System {
-    fn new() -> Self {
+    fn new(settings: Settings) -> Self {
         let window = System::setup();
         let (height, width) = System::get_height_width(&window);
         System {
             window,
-            // apparently previous ones are reserved for colors and so
-            // attributes conflict with them when invoked, so start with 8
-            next_colorid_to_use: 8,
-            next_paintid_to_use: 1,
-            colors: HashMap::new(),
-            paints: HashMap::new(),
+            // color_system: ColorSystem {
+            //     // apparently previous ones are reserved for colors and so
+            //     // attributes conflict with them when invoked, so start with 8
+            //     next_colorid_to_use: 8,
+            //     next_paintid_to_use: 1,
+            //     colors: HashMap::new(),
+            //     paints: HashMap::new(),
+            // },
             height: height,
             width: width,
             primary_paint: Paint{fg: Color::White, bg: Color::Black},
+            columns_count: settings.columns_ratio.len() as u32,
+            columns_coord: System::positions_from_ratio(settings.columns_ratio, width),
         }
     }
 
-    fn clear(&mut self) {
-        self.set_paint(self.primary_paint);
+    fn positions_from_ratio(ratio: Vec<u32>, width: Coord) -> Vec<(Coord, Coord)> {
+        let width = width as f32;
+        let sum = ratio.iter().sum::<u32>() as f32;
+        let mut pos: Coord = 0;
+        let mut positions: Vec<(Coord, Coord)> = Vec::new();
+        for r in ratio.into_iter() {
+            let weight: Coord = ((r as f32 / sum) * width) as Coord;
+            positions.push((pos, pos + weight));
+            pos += weight + 1;
+        }
+        positions
+    }
+
+    fn clear(&self, color_system: &mut ColorSystem) {
+        color_system.set_paint(&self.window, self.primary_paint);
         for y in 0..self.height {
             self.window.mv(y, 0);
             self.window.hline(' ', self.width);
@@ -109,15 +106,18 @@ impl System {
         self.window.refresh();
     }
 
-    fn draw(&mut self) {
-        self.draw_borders();
-        self.draw_column(4);
-        self.draw_column(5);
+    fn draw(&self, mut color_system: &mut ColorSystem) {
+        self.draw_borders(&mut color_system);
+        for (start, _end) in self.columns_coord.iter().skip(1) {
+            self.draw_column(color_system, *start);
+        }
+
+        // self.draw_column(5);
         self.window.refresh();
     }
 
-    fn draw_column(&mut self, x: Coord) {
-        self.set_paint(self.primary_paint);
+    fn draw_column(&self, color_system: &mut ColorSystem, x: Coord) {
+        color_system.set_paint(&self.window, self.primary_paint);
         self.window.mv(0, x);
         self.window.addch(ACS_TTEE());
         self.window.mv(1, x);
@@ -126,8 +126,8 @@ impl System {
         self.window.addch(ACS_BTEE());
     }
 
-    fn draw_borders(&mut self) {
-        self.set_paint(self.primary_paint);
+    fn draw_borders(&self, color_system: &mut ColorSystem) {
+        color_system.set_paint(&self.window, self.primary_paint);
 
         self.window.mv(0, 0);
         self.window.addch(ACS_ULCORNER());
@@ -149,42 +149,6 @@ impl System {
         }
     }
 
-    fn get_maybe_add_paint(&mut self, paint: Paint) -> PaintId {
-        if !self.paints.contains_key(&paint) {
-            self.paints.insert(paint, self.next_paintid_to_use);
-            let fg = self.get_maybe_add_color(paint.fg);
-            let bg = self.get_maybe_add_color(paint.bg);
-            init_pair(self.next_paintid_to_use, fg, bg);
-            self.next_paintid_to_use += 1;
-        }
-        *self.paints.get(&paint).unwrap()
-    }
-
-    fn get_maybe_add_color(&mut self, color: Color) -> ColorId {
-        if !self.colors.contains_key(&color) {
-            self.colors.insert(color, self.next_colorid_to_use);
-            let (r, g, b) = get_rgb(color);
-            init_color(self.next_colorid_to_use, r, g, b);
-            self.next_colorid_to_use += 1;
-        }
-        *self.colors.get(&color).unwrap()
-    }
-
-    fn set_paint(&mut self, paint: Paint) {
-        let paint_id = self.get_maybe_add_paint(paint);
-        self.window.attron(ColorPair(paint_id as u8));
-    }
-
-    fn set_attr(&mut self, attr: Attr, mode: Mode) {
-        let attr = match attr {
-            Attr::Bold       => A_BOLD,
-            Attr::Underlined => A_UNDERLINE,
-        };
-        match mode {
-            Mode::On => self.window.attron(attr),
-            Mode::Off => self.window.attroff(attr),
-        };
-    }
 
     fn setup() -> Window {
         let window = initscr();
@@ -235,7 +199,7 @@ fn traverse_path(path: &Path, ident: u8) -> io::Result<()> {
         if name == "debug" || name == ".git" {
             continue;
         }
-        for i in 0..ident {
+        for _ in 0..ident {
             print!("|  ");
         }
         print!("*");
@@ -259,10 +223,16 @@ fn main() {
     // println!("started");
     // traverse("../..");
 
-    let mut system = System::new();
-    system.clear();
-    system.draw();
+    let mut color_system = ColorSystem::new();
+    let system = System::new(
+        Settings {
+            columns_ratio: vec![1,3,1],
+        }
+    );
+    system.clear(&mut color_system);
+    system.draw(&mut color_system);
     // system.set_paint(Paint{fg: Color::Blue, bg: Color::Cyan});
     // system.window.printw("yeap");
+    // while system.window.getch().unwrap_or('w') != 'q' {}
     system.window.getch();
 }
