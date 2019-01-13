@@ -42,6 +42,28 @@ pub enum Color {
 pub struct Paint {
     pub fg: Color,
     pub bg: Color,
+    pub bold: bool,
+    pub underlined: bool,
+}
+
+impl Paint {
+    pub fn new(fg: Color, bg: Color) -> Paint {
+        Paint {
+            fg,
+            bg,
+            bold: false,
+            underlined: false,
+        }
+    }
+
+    pub fn new_full(fg: Color, bg: Color, bold: bool, underlined: bool) -> Paint {
+        Paint {
+            fg,
+            bg,
+            bold,
+            underlined,
+        }
+    }
 }
 
 fn get_rgb(color: Color) -> RGB {
@@ -81,6 +103,16 @@ impl ColorSystem {
     pub fn set_paint(&mut self, window: &Window, paint: Paint) {
         let paint_id = self.get_maybe_add_paint(paint);
         window.attron(ColorPair(paint_id as u8));
+        if paint.bold {
+            self.set_attr(&window, Attr::Bold, Mode::On);
+        } else {
+            self.set_attr(&window, Attr::Bold, Mode::Off);
+        }
+        if paint.underlined {
+            self.set_attr(&window, Attr::Underlined, Mode::On);
+        } else {
+            self.set_attr(&window, Attr::Underlined, Mode::Off);
+        }
     }
 
     pub fn set_attr(&mut self, window: &Window, attr: Attr, mode: Mode) {
