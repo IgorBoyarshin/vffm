@@ -1,4 +1,9 @@
+use std::time::Duration;
+use std::thread;
+
 extern crate pancurses;
+use pancurses::Input;
+
 mod coloring;
 use crate::coloring::*;
 
@@ -17,7 +22,7 @@ fn main() {
     starting_path.pop();
     starting_path.pop();
     starting_path.pop();
-    let system = System::new(
+    let mut system = System::new(
         Settings {
             columns_ratio: vec![2,3,2],
             dir_paint: Paint {fg: Color::Cyan, bg: Color::Black, bold: true, underlined: false},
@@ -29,7 +34,19 @@ fn main() {
     system.clear(&mut color_system);
     system.draw(&mut color_system);
 
-    // let names = collect_dir(".").into_iter().map(|f| f.name).collect();
-    // system.list_entries(&mut color_system, 1, collect_dir("."));
-    system.get();
+    let mut terminated = false;
+    while !terminated {
+        if let Some(Input::Character(c)) = system.get() {
+            if c == 'q' {
+                terminated = true;
+            } else if c == 'j' {
+                system.down();
+            } else if c == 'k' {
+                system.up();
+            }
+        }
+        system.clear(&mut color_system);
+        system.draw(&mut color_system);
+        thread::sleep_ms(30);
+    };
 }
