@@ -1,21 +1,6 @@
 use std::collections::HashMap;
 use pancurses::*;
 
-fn get_rgb(color: Color) -> RGB {
-    match color {
-        Color::RGB(r, g, b) => (r, g, b),
-        Color::Black => (0, 0, 0),
-        Color::Red => (1000, 0, 0),
-        Color::Green => (0, 1000, 0),
-        Color::Yellow => (1000, 1000, 0),
-        Color::Blue => (0, 0, 1000),
-        Color::Purple => (500, 0, 500),
-        Color::Cyan => (0, 1000, 1000),
-        Color::White => (1000, 1000, 1000),
-    }
-}
-
-
 // pub static mut color_system: ColorSystem = ColorSystem {
 //     // apparently previous ones are reserved for colors and so
 //     // attributes conflict with them when invoked, so start with 8
@@ -31,9 +16,11 @@ type RGB = (ColorComponent, ColorComponent, ColorComponent);
 type ColorId = i16;
 type PaintId = i16;
 
+
 pub enum Attr {
     Bold, Underlined,
 }
+
 pub enum Mode {
     On, Off,
 }
@@ -57,6 +44,20 @@ pub struct Paint {
     pub bg: Color,
 }
 
+fn get_rgb(color: Color) -> RGB {
+    match color {
+        Color::RGB(r, g, b) => (r, g, b),
+        Color::Black => (0, 0, 0),
+        Color::Red => (1000, 0, 0),
+        Color::Green => (0, 1000, 0),
+        Color::Yellow => (1000, 1000, 0),
+        Color::Blue => (0, 0, 1000),
+        Color::Purple => (500, 0, 500),
+        Color::Cyan => (0, 1000, 1000),
+        Color::White => (1000, 1000, 1000),
+    }
+}
+//-----------------------------------------------------------------------------
 pub struct ColorSystem {
     next_colorid_to_use: ColorId,
     next_paintid_to_use: PaintId,
@@ -75,6 +76,22 @@ impl ColorSystem {
             colors: HashMap::new(),
             paints: HashMap::new(),
         }
+    }
+
+    pub fn set_paint(&mut self, window: &Window, paint: Paint) {
+        let paint_id = self.get_maybe_add_paint(paint);
+        window.attron(ColorPair(paint_id as u8));
+    }
+
+    pub fn set_attr(&mut self, window: &Window, attr: Attr, mode: Mode) {
+        let attr = match attr {
+            Attr::Bold       => A_BOLD,
+            Attr::Underlined => A_UNDERLINE,
+        };
+        match mode {
+            Mode::On =>  window.attron(attr),
+            Mode::Off => window.attroff(attr),
+        };
     }
 
     fn get_maybe_add_paint(&mut self, paint: Paint) -> PaintId {
@@ -96,21 +113,5 @@ impl ColorSystem {
             self.next_colorid_to_use += 1;
         }
         *self.colors.get(&color).unwrap()
-    }
-
-    pub fn set_paint(&mut self, window: &Window, paint: Paint) {
-        let paint_id = self.get_maybe_add_paint(paint);
-        window.attron(ColorPair(paint_id as u8));
-    }
-
-    pub fn set_attr(&mut self, window: &Window, attr: Attr, mode: Mode) {
-        let attr = match attr {
-            Attr::Bold       => A_BOLD,
-            Attr::Underlined => A_UNDERLINE,
-        };
-        match mode {
-            Mode::On =>  window.attron(attr),
-            Mode::Off => window.attroff(attr),
-        };
     }
 }

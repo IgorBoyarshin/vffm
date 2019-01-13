@@ -36,23 +36,11 @@ struct Settings {
 // }
 
 
-// struct Single {
-//     inst: Box<Single>,
-// }
-//
-// impl Single {
-//     fn inst() {
-//         // self.inst
-//     }
-// }
-
-
 type Coord = i32;
 
 
 struct System {
     window: Window,
-    // color_system: ColorSystem,
 
     height: Coord,
     width: Coord,
@@ -68,14 +56,6 @@ impl System {
         let (height, width) = System::get_height_width(&window);
         System {
             window,
-            // color_system: ColorSystem {
-            //     // apparently previous ones are reserved for colors and so
-            //     // attributes conflict with them when invoked, so start with 8
-            //     next_colorid_to_use: 8,
-            //     next_paintid_to_use: 1,
-            //     colors: HashMap::new(),
-            //     paints: HashMap::new(),
-            // },
             height: height,
             width: width,
             primary_paint: Paint{fg: Color::White, bg: Color::Black},
@@ -112,7 +92,6 @@ impl System {
             self.draw_column(color_system, *start);
         }
 
-        // self.draw_column(5);
         self.window.refresh();
     }
 
