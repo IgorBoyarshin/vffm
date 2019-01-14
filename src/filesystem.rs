@@ -3,6 +3,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::fs::{self};
 
+#[derive(PartialEq, Eq)]
 pub enum EntryType {
     Regular,
     Directory,
@@ -51,6 +52,12 @@ pub fn collect_dir(path: &str) -> Vec<Entry> {
     }
 
     vec
+}
+
+pub fn files_in_dir(pathbuf: &PathBuf) -> usize {
+    fs::read_dir(pathbuf)
+        .expect(&format!("Could not read dir{}", pathbuf.to_str().expect("")))
+        .count()
 }
 
 pub fn absolute_path() -> String {

@@ -29,11 +29,10 @@ pub struct System {
     symlink_paint: Paint,
     file_paint: Paint,
 
+    current_dir_length: usize,
     current_path: PathBuf,
     current_index: usize,
     parent_index: usize,
-
-    current_dir_length: usize,
 }
 
 impl System {
@@ -51,10 +50,10 @@ impl System {
             file_paint: settings.file_paint,
             columns_count: settings.columns_ratio.len() as u32,
             columns_coord: System::positions_from_ratio(settings.columns_ratio, width),
+            current_dir_length: files_in_dir(&starting_path),
             current_path: starting_path,
             current_index: 0,
             parent_index: 0,
-            current_dir_length: 100, // TODO: change!!!!!!!
         }
     }
 
@@ -67,9 +66,15 @@ impl System {
         let sum = ratio.iter().sum::<u32>() as f32;
         let mut pos: Coord = 0;
         let mut positions: Vec<(Coord, Coord)> = Vec::new();
-        for r in ratio.into_iter() {
+        let last_index = ratio.len() - 1;
+        for (index, r) in ratio.into_iter().enumerate() {
             let weight = ((r as f32 / sum) * width) as Coord;
-            positions.push((pos, pos + weight));
+            let end = if index == last_index {
+                width as i32 - 2
+            } else {
+                pos + weight
+            };
+            positions.push((pos, end));
             pos += weight + 1;
         }
         positions
@@ -89,23 +94,46 @@ impl System {
 
     pub fn human_size(size: u64) -> String {
         if size < 1024 { return size.to_string() + " B"; }
+        // Kilo
         let full = size / 1024;
         if full < 1024 {
             let mut string = full.to_string();
-
             let remainder = size % 1024;
             if remainder != 0 {
-                let remainder = (size % 1024) * 10 / 1024;
-                // // prevent possible overflow because of wrong scale
-                // if remainder > 9 { remainder = 9; }
                 string += ".";
-                string += &remainder.to_string();
+                string += &(remainder * 10 / 1024).to_string();
             }
 
             return string + " K";
         }
+        // Mega
+        let size = size / 1024;
+        let full = size / 1024;
+        if full < 1024 {
+            let mut string = full.to_string();
+            let remainder = size % 1024;
+            if remainder != 0 {
+                string += ".";
+                string += &(remainder * 10 / 1024).to_string();
+            }
 
-        "".to_string()
+            return string + " M";
+        }
+        // Giga
+        let size = size / 1024;
+        let full = size / 1024;
+        if full < 1024 {
+            let mut string = full.to_string();
+            let remainder = size % 1024;
+            if remainder != 0 {
+                string += ".";
+                string += &(remainder * 10 / 1024).to_string();
+            }
+
+            return string + " G";
+        }
+
+        "<>".to_string()
     }
 
     fn list_entry(&self, cs: &mut ColorSystem, column_index: usize,
@@ -132,9 +160,12 @@ impl System {
     }
 
     fn list_entries(&self, mut cs: &mut ColorSystem, column_index: usize,
-            entries: Vec<Entry>, selected_index: usize) {
+            entries: Vec<Entry>, selected_index: Option<usize>) {
         for (index, entry) in entries.into_iter().enumerate() {
-            let selected = index == selected_index;
+            let selected = match selected_index {
+                Some(i) => (i == index),
+                None    => false,
+            };
             self.list_entry(&mut cs, column_index, index, entry, selected);
         }
         self.window.refresh();
@@ -161,6 +192,16 @@ impl System {
         }
     }
 
+    pub fn left(&mut self) {
+        if !self.at_root() {
+            // self.
+        }
+    }
+
+    fn at_root(&self) -> bool {
+        self.current_path.parent() == None
+    }
+
     // pub fn fill_column(&self, index: usize, strings: Vec<String>) {
     //     let (begin, _end) = self.columns_coord[index];
     //     for (index, string) in strings.into_iter().enumerate() {
@@ -181,10 +222,21 @@ impl System {
     pub fn draw(&self, mut cs: &mut ColorSystem) {
         self.draw_borders(&mut cs);
 
+        // Previous
         let mut previous = self.current_path.clone();
         previous.pop();
-        self.list_entries(&mut cs, 0, collect_dir_pathbuf(&previous), self.parent_index);
-        self.list_entries(&mut cs, 1, collect_dir_pathbuf(&self.current_path), self.current_index);
+        self.list_entries(&mut cs, 0, collect_dir_pathbuf(&previous), Some(self.parent_index));
+        // Current
+        let entries = collect_dir_pathbuf(&self.current_path);
+        let current_is_dir = entries[self.current_index].entrytype == EntryType::Directory;
+        let current_name = entries[self.current_index].name.clone();
+        self.list_entries(&mut cs, 1, entries, Some(self.current_index));
+        // Next
+        if current_is_dir {
+            let mut next = self.current_path.clone();
+            next.push(current_name);
+            self.list_entries(&mut cs, 2, collect_dir_pathbuf(&next), None);
+        }
 
         self.window.refresh();
     }
