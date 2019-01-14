@@ -87,6 +87,27 @@ impl System {
     //     self.window.refresh();
     // }
 
+    pub fn human_size(size: u64) -> String {
+        if size < 1024 { return size.to_string() + " B"; }
+        let full = size / 1024;
+        if full < 1024 {
+            let mut string = full.to_string();
+
+            let remainder = size % 1024;
+            if remainder != 0 {
+                let remainder = (size % 1024) * 10 / 1024;
+                // // prevent possible overflow because of wrong scale
+                // if remainder > 9 { remainder = 9; }
+                string += ".";
+                string += &remainder.to_string();
+            }
+
+            return string + " K";
+        }
+
+        "".to_string()
+    }
+
     fn list_entry(&self, cs: &mut ColorSystem, column_index: usize,
             entry_index: usize, entry: Entry, selected: bool) {
         let paint = match entry.entrytype {
@@ -99,7 +120,8 @@ impl System {
 
         let (begin, end) = self.columns_coord[column_index];
         let column_width = end - begin;
-        let size = entry.size.to_string();
+        // let size = entry.size.to_string();
+        let size = System::human_size(entry.size);
         let name_len = entry.name.len() as i32;
         let empty_space_length = column_width - name_len - size.len() as i32;
         let y = entry_index as Coord + 1;
