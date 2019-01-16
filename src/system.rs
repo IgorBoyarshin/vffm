@@ -23,7 +23,6 @@ pub struct System {
     width: Coord,
 
     primary_paint: Paint,
-    columns_count: u32,
     columns_coord: Vec<(Coord, Coord)>,
 
     dir_paint: Paint,
@@ -56,19 +55,17 @@ impl System {
             window,
             height,
             width,
+
             primary_paint,
             dir_paint: settings.dir_paint,
             symlink_paint: settings.symlink_paint,
             file_paint: settings.file_paint,
             unknown_paint: settings.unknown_paint,
 
-            columns_count: settings.columns_ratio.len() as u32,
             columns_coord: System::positions_from_ratio(settings.columns_ratio, width),
-
 
             parent_index: index_inside(&starting_path),
             current_index: 0,
-
             current_siblings,
             parent_siblings: collect_siblings_of(&starting_path),
             child_siblings: System::collect_children(&first_entry_path),
@@ -117,18 +114,6 @@ impl System {
         }
         positions
     }
-
-    // pub fn put_str(&self, cs: &mut ColorSystem, y: Coord, x: Coord, string: &str) {
-    //     self.window.mvprintw(y, x, string);
-    //     self.window.refresh();
-    // }
-    //
-    // pub fn put_str_line(&self, cs: &mut ColorSystem, y: Coord, x: Coord, string: &str, length: i32) {
-    //     self.window.mvprintw(y, x, string);
-    //     let length = length - string.len() as i32;
-    //     self.window.hline(' ', length);
-    //     self.window.refresh();
-    // }
 
     pub fn human_size(size: u64) -> String {
         if size < 1024 { return size.to_string() + " B"; }
@@ -206,19 +191,16 @@ impl System {
             };
             self.list_entry(&mut cs, column_index, index, &entry, selected);
         }
-        self.window.refresh();
     }
 
     fn maybe_selected_paint_from(paint: Paint, convert: bool) -> Paint {
         if convert {
             let Paint {fg, bg, bold: _, underlined} = paint;
             Paint {fg: bg, bg: fg, bold: true, underlined}
-        } else {
-            paint
-        }
+        } else { paint }
     }
 
-    pub fn update_current_from_index(&mut self) {
+    fn update_current_from_index(&mut self) {
         let current_entry = self.current_entry_ref();
         let name = current_entry.name.clone();
         let current_is_dir = current_entry.is_dir();
@@ -253,7 +235,11 @@ impl System {
 
     pub fn left(&mut self) {
         if !is_root(&self.parent_path) {
-            self.current_path.as_mut().map(|path| path.pop());
+            if self.current_path.is_none() {
+                self.current_path = Some(self.parent_path.clone());
+            } else {
+                self.current_path.as_mut().map(|path| path.pop());
+            }
             self.parent_path.pop();
 
             self.current_index = self.parent_index;
@@ -302,32 +288,42 @@ impl System {
         self.window.refresh();
     }
 
+    fn write_empty_sign(&self, cs: &mut ColorSystem, column_index: usize) {
+        cs.set_paint(&self.window, Paint{fg: Color::Black, bg: Color::Red, bold: true, underlined: false});
+        let (begin, _) = self.columns_coord[column_index];
+        self.window.mvprintw(1, begin + 1, "empty");
+    }
+
     pub fn draw(&self, mut cs: &mut ColorSystem) {
         self.draw_borders(&mut cs);
 
         // Previous
-        self.list_entries(&mut cs, 0, &self.parent_siblings, Some(self.parent_index));
+        let column_index = 0;
+        self.list_entries(&mut cs, column_index, &self.parent_siblings, Some(self.parent_index));
 
         // Current
+        let column_index = 1;
         if self.current_siblings.is_empty() {
-            // TODO: write <empty>
+            self.write_empty_sign(&mut cs, column_index);
         } else {
-            self.list_entries(&mut cs, 1, &self.current_siblings, Some(self.current_index));
+            self.list_entries(&mut cs, column_index, &self.current_siblings, Some(self.current_index));
         }
 
         // Next
+        let column_index = 2;
         if !self.inside_empty_dir() {
-            // TODO: also check that current is dir,
-            // but since for now we just would display empty vector and nothing more,
-            // both are unnecessary, so might as well skip one
-            self.list_entries(&mut cs, 2, &self.child_siblings, None);
+            if self.current_is_dir() && self.child_siblings.is_empty() {
+                self.write_empty_sign(&mut cs, column_index);
+            } else {
+                self.list_entries(&mut cs, column_index, &self.child_siblings, None);
+            }
         }
 
         // TODO: remove
-        if let Some(path) = self.current_path.clone() {
-            cs.set_paint(&self.window, Paint{fg: Color::Red, bg: Color::Black, bold: true, underlined: false});
-            self.window.mvprintw(20, 20, path.to_str().unwrap());
-        }
+        // if let Some(path) = self.current_path.clone() {
+        //     cs.set_paint(&self.window, Paint{fg: Color::Red, bg: Color::Black, bold: true, underlined: false});
+        //     self.window.mvprintw(20, 20, path.to_str().unwrap());
+        // }
 
         self.window.refresh();
     }

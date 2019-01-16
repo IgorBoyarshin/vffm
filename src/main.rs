@@ -13,14 +13,10 @@ use crate::system::*;
 mod filesystem;
 use crate::filesystem::*;
 
-use std::path::Path;
-use std::fs::{self};
+// use std::path::Path;
+// use std::fs::{self};
 
 fn main() {
-    // let parent = Path::new("/foo").parent().unwrap();
-    // let parent_name = parent.file_name();
-    // println!("{}", parent_name);
-
     let mut color_system = ColorSystem::new();
     let mut starting_path = absolute_pathbuf();
     starting_path.pop();

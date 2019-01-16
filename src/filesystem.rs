@@ -142,9 +142,7 @@ pub fn get_parent_index(path: &PathBuf) -> usize {
         return 0; // the index of '/' is always 0 (it is the only one there)
     }
     let parent_name = parent_name.unwrap().to_str().unwrap();
-    // panic!(format!("{}", parent_name)); // TODO
     0
-    // index_of_name_inside(&parent.to_path_buf(), parent_name).unwrap()
 }
 
 pub fn files_count_in_dir(pathbuf: &PathBuf) -> usize {

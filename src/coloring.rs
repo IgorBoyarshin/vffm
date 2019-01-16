@@ -1,15 +1,6 @@
 use std::collections::HashMap;
 use pancurses::*;
 
-// pub static mut color_system: ColorSystem = ColorSystem {
-//     // apparently previous ones are reserved for colors and so
-//     // attributes conflict with them when invoked, so start with 8
-//     next_colorid_to_use: 8,
-//     next_paintid_to_use: 1,
-//     colors: HashMap::new(),
-//     paints: HashMap::new(),
-// };
-
 
 type ColorComponent = i16;
 type RGB = (ColorComponent, ColorComponent, ColorComponent);
