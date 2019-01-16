@@ -29,11 +29,6 @@ pub struct System {
     symlink_paint: Paint,
     file_paint: Paint,
 
-    // current_dir_length: usize,
-    // parent_index: usize,
-    // current_path: PathBuf,
-    // current_index: usize,
-
     current_entry: Option<Entry>,
     current_siblings: Vec<Entry>,
     parent_siblings: Vec<Entry>,
@@ -44,14 +39,6 @@ pub struct System {
 
     parent_index: usize,
     current_index: usize,
-
-    // parent_dir_entries: Vec<Entry>,
-    // current_dir_entries: Vec<Entry>,
-    // current_index: usize,
-    // current_entry: Option<Entry>,
-    // current_path: Option<PathBuf>,
-    // parent_index: usize,
-    // parent_path: PathBuf,
 }
 
 impl System {
@@ -82,61 +69,25 @@ impl System {
 
             columns_count: settings.columns_ratio.len() as u32,
             columns_coord: System::positions_from_ratio(settings.columns_ratio, width),
-    // current_entry: Option<Entry>,
-    // current_siblings: Vec<Entry>,
-    // parent_siblings: Vec<Entry>,
-    // child_siblings: Vec<Entry>,
-    //
-    // current_path: Option<PathBuf>,
-    // parent_path: PathBuf,
-    //
-    // parent_index: usize,
-    // current_index: usize,
 
 
             parent_index: index_inside(&starting_path),
             current_index: 0,
 
-            current_siblings: collect_dir_pathbuf(&starting_path),
-            parent_siblings: {
-                // TODO: can improve??
-                if is_root(&starting_path) {
-                    vec![Entry {entrytype: EntryType::Directory, name: "/".to_string(), size: 4096}]
-                } else {
-                    let mut path = starting_path.clone();
-                    path.pop();
-                    collect_dir_pathbuf(&path)
-                }
-            },
-            child_siblings: {
-                if first_entry.as_ref().unwrap().entrytype == EntryType::Directory {
-                    if let Some(path) = &first_entry_path {
-                        collect_dir_pathbuf(&path)
-                    } else {
-                        Vec::new()
-                    }
-                } else { Vec::new() }
-            },
+            current_siblings: collect_dir(&starting_path),
+            parent_siblings: collect_siblings_of(&starting_path),
+            child_siblings: System::collect_children(&first_entry_path),
             current_entry: first_entry,
             current_path: first_entry_path,
-            // child_siblings: vec![],
 
             parent_path: starting_path,
-
-            // current_dir_entries: collect_dir_pathbuf(&starting_path),
-            // current_index: 0,
-            // current_path: (|entry: &Option<Entry>| {
-            //     if let Some(entry) = entry {
-            //         let name = entry.name.clone();
-            //         let mut path = starting_path.clone();
-            //         path.push(name);
-            //         Some(path)
-            //     } else { None }
-            // })(&first_entry),
-            // current_entry: first_entry,
-            // parent_index: get_parent_index(&starting_path),
-            // parent_path: starting_path,
         }
+    }
+
+    fn collect_children(path: &Option<PathBuf>) -> Vec<Entry> {
+        if let Some(path) = path {
+            collect_dir(&path)
+        } else { Vec::new() }
     }
 
     pub fn get(&self) -> Option<Input> {
@@ -272,7 +223,7 @@ impl System {
         self.child_siblings = {
             if self.current_entry.as_ref().unwrap().entrytype == EntryType::Directory {
                 if let Some(path) = &self.current_path {
-                    collect_dir_pathbuf(&path)
+                    collect_dir(&path)
                 } else { Vec::new() }
             } else { Vec::new() }
         };
@@ -294,14 +245,20 @@ impl System {
         }
     }
 
+    // current_entry: Option<Entry>,
+    // current_siblings: Vec<Entry>,
+    // parent_siblings: Vec<Entry>,
+    // child_siblings: Vec<Entry>,
     pub fn left(&mut self) {
-        if !self.at_root() {
-            // self.
-        }
-    }
-
-    fn at_root(&self) -> bool {
-        is_root(&self.parent_path)
+        // if !is_root(&self.parent_path) {
+        //     self.current_path.as_mut().map(|path| path.pop());
+        //     self.parent_path.pop();
+        //
+        //     self.current_index = self.parent_index;
+        //     self.parent_index = index_inside(&self.parent_path);
+        //
+        //     self.child_siblings = self.current_siblings;
+        // }
     }
 
     // pub fn fill_column(&self, index: usize, strings: Vec<String>) {
@@ -336,17 +293,6 @@ impl System {
         if self.current_entry.is_some() {
             self.list_entries(&mut cs, 2, &self.child_siblings, None);
         }
-        // if self.current_entry.is_some() {
-        //     let current_is_dir = self.current_entry
-        //         // .expect("Somewhy dir not empty but current entry is None")
-        //         .unwrap()
-        //         .entrytype == EntryType::Directory;
-        //     if current_is_dir {
-        //         // let mut next = self.current_path.clone();
-        //         // next.push(current_name);
-        //         self.list_entries(&mut cs, 2, collect_dir_pathbuf(&next), None);
-        //     }
-        // }
 
         if let Some(path) = self.current_path.clone() {
             cs.set_paint(&self.window, Paint{fg: Color::Red, bg: Color::Black, bold: true, underlined: false});

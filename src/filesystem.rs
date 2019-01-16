@@ -18,21 +18,33 @@ pub struct Entry {
 }
 
 
-pub fn collect_dir_pathbuf(pathbuf: &PathBuf) -> Vec<Entry> {
+pub fn collect_dir(path: &PathBuf) -> Vec<Entry> {
     let mut vec = Vec::new();
-    let entries = fs::read_dir(pathbuf)
-                        .expect(&format!("Could not read dir{:?}", pathbuf));
+    if !path.is_dir() { return vec; }
+    let entries = fs::read_dir(path)
+                        .expect(&format!("Could not read dir{:?}", path));
     for entry in entries {
         let dir_entry = entry.expect("Could not retrieve entry");
         vec.push(into_entry(dir_entry));
     }
 
     vec
-    // collect_dir(pathbuf.to_str().unwrap())
 }
 
-// pub fn entry_from_str(path: &str) -> Entry {
-// }
+pub fn collect_siblings_of(path: &PathBuf) -> Vec<Entry> {
+    if is_root(&path) {
+        vec![Entry {
+            entrytype: EntryType::Directory,
+            name: "/".to_string(),
+            size: 4096
+        }]
+    } else {
+        let mut path = path.clone();
+        path.pop();
+        collect_dir(&path)
+    }
+}
+
 
 fn into_entry(dir_entry: DirEntry) -> Entry {
     let name = dir_entry.file_name().to_str().unwrap().to_string();
@@ -59,18 +71,6 @@ fn into_entry(dir_entry: DirEntry) -> Entry {
         size,
     }
 }
-
-// pub fn collect_dir(path: &str) -> Vec<Entry> {
-//     let mut vec = Vec::new();
-//     let entries = fs::read_dir(Path::new(path))
-//                         .expect(&format!("Could not read dir{}", path));
-//     for entry in entries {
-//         let dir_entry = entry.expect("Could not retrieve entry");
-//         vec.push(into_entry(dir_entry));
-//     }
-//
-//     vec
-// }
 
 pub fn first_entry_inside(pathbuf: &PathBuf) -> Option<Entry> {
     let result = fs::read_dir(pathbuf)
