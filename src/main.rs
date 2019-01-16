@@ -13,15 +13,20 @@ use crate::system::*;
 mod filesystem;
 use crate::filesystem::*;
 
-// use std::path::Path;
-// use std::fs::{self};
+use std::path::Path;
+use std::fs::{self};
 
 fn main() {
+    // let parent = Path::new("/foo").parent().unwrap();
+    // let parent_name = parent.file_name();
+    // println!("{}", parent_name);
+
     let mut color_system = ColorSystem::new();
     let mut starting_path = absolute_pathbuf();
     starting_path.pop();
     starting_path.pop();
     starting_path.pop();
+    println!("{:?}", starting_path);
     let mut system = System::new(
         Settings {
             columns_ratio: vec![2,3,2],
@@ -47,6 +52,6 @@ fn main() {
         }
         system.clear(&mut color_system);
         system.draw(&mut color_system);
-        thread::sleep_ms(30);
+        thread::sleep_ms(20);
     };
 }
