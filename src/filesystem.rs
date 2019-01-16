@@ -50,8 +50,9 @@ impl Entry {
 pub fn collect_dir(path: &PathBuf) -> Vec<Entry> {
     let mut vec = Vec::new();
     if !path.is_dir() { return vec; }
-    let entries = fs::read_dir(path)
-                        .expect(&format!("Could not read dir{:?}", path));
+    let entries = fs::read_dir(path);
+    if !entries.is_ok() { return Vec::new(); }
+    let entries = entries.expect(&format!("Could not read dir{:?}", path));
     for entry in entries {
         let dir_entry = entry.expect("Could not retrieve entry");
         vec.push(into_entry(dir_entry));

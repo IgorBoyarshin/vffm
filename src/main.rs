@@ -22,7 +22,7 @@ fn main() {
     starting_path.pop();
     starting_path.pop();
     starting_path.pop();
-    println!("{:?}", starting_path);
+    // println!("{:?}", starting_path);
     let mut system = System::new(
         Settings {
             columns_ratio: vec![2,3,2],
