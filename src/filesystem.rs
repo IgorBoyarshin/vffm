@@ -3,11 +3,28 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::fs::{self, DirEntry};
 
+
+//------------------------
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::fs::OpenOptions;
+use std::fs::File;
+use std::io::Write;
+
+pub fn log(s: &str) {
+    // let name = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string();
+    let name = "log.txt";
+    let mut file = OpenOptions::new().append(true).create(true).open(name).unwrap();
+    file.write_all(s.as_bytes());
+    file.write_all(b"\n");
+}
+//------------------------
+
 #[derive(PartialEq, Eq, Clone)]
 pub enum EntryType {
     Regular,
     Directory,
     Symlink,
+    Unknown,
 }
 
 #[derive(Clone)]
@@ -15,6 +32,18 @@ pub struct Entry {
     pub entrytype: EntryType,
     pub name: String,
     pub size: u64,
+}
+
+impl Entry {
+    pub fn is_symlink(&self) -> bool {
+        self.entrytype == EntryType::Symlink
+    }
+    pub fn is_regular(&self) -> bool {
+        self.entrytype == EntryType::Regular
+    }
+    pub fn is_dir(&self) -> bool {
+        self.entrytype == EntryType::Directory
+    }
 }
 
 
@@ -60,7 +89,8 @@ fn into_entry(dir_entry: DirEntry) -> Entry {
         } else if ft.is_symlink() {
             entrytype = EntryType::Symlink;
         } else {
-            panic!("Unknown filetype!");
+            entrytype = EntryType::Unknown;
+            // panic!("Unknown filetype!");
         }
         entrytype
     };

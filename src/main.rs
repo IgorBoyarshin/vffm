@@ -33,6 +33,7 @@ fn main() {
             dir_paint: Paint {fg: Color::Cyan, bg: Color::Black, bold: true, underlined: false},
             symlink_paint: Paint {fg: Color::Yellow, bg: Color::Black, bold: true, underlined: false},
             file_paint: Paint {fg: Color::White, bg: Color::Black, bold: false, underlined: false},
+            unknown_paint: Paint {fg: Color::Grey, bg: Color::White, bold: true, underlined: false},
         },
         starting_path,
     );
@@ -48,10 +49,14 @@ fn main() {
                 system.down();
             } else if c == 'k' {
                 system.up();
+            } else if c == 'h' {
+                system.left();
+            } else if c == 'l' {
+                system.right();
             }
         }
         system.clear(&mut color_system);
         system.draw(&mut color_system);
-        thread::sleep_ms(20);
+        thread::sleep_ms(5);
     };
 }

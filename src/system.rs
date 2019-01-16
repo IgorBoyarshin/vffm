@@ -13,6 +13,7 @@ pub struct Settings {
     pub dir_paint: Paint,
     pub symlink_paint: Paint,
     pub file_paint: Paint,
+    pub unknown_paint: Paint,
 }
 
 pub struct System {
@@ -28,8 +29,8 @@ pub struct System {
     dir_paint: Paint,
     symlink_paint: Paint,
     file_paint: Paint,
+    unknown_paint: Paint,
 
-    current_entry: Option<Entry>,
     current_siblings: Vec<Entry>,
     parent_siblings: Vec<Entry>,
     child_siblings: Vec<Entry>,
@@ -48,15 +49,8 @@ impl System {
         let primary_paint =
             Paint{fg: Color::White, bg: Color::Black, bold: false, underlined: false};
 
-        let first_entry = first_entry_inside(&starting_path);
-        let first_entry_path = {
-            if let Some(entry) = &first_entry {
-                let name = entry.name.clone();
-                let mut path = starting_path.clone();
-                path.push(name);
-                Some(path)
-            } else { None }
-        };
+        let current_siblings = collect_dir(&starting_path);
+        let first_entry_path = System::path_of_first_entry_inside(&starting_path, &current_siblings);
 
         System {
             window,
@@ -66,6 +60,7 @@ impl System {
             dir_paint: settings.dir_paint,
             symlink_paint: settings.symlink_paint,
             file_paint: settings.file_paint,
+            unknown_paint: settings.unknown_paint,
 
             columns_count: settings.columns_ratio.len() as u32,
             columns_coord: System::positions_from_ratio(settings.columns_ratio, width),
@@ -74,14 +69,24 @@ impl System {
             parent_index: index_inside(&starting_path),
             current_index: 0,
 
-            current_siblings: collect_dir(&starting_path),
+            current_siblings,
             parent_siblings: collect_siblings_of(&starting_path),
             child_siblings: System::collect_children(&first_entry_path),
-            current_entry: first_entry,
             current_path: first_entry_path,
-
             parent_path: starting_path,
         }
+    }
+
+    fn inside_empty_dir(&self) -> bool {
+        self.current_path.is_none()
+    }
+
+    fn path_of_first_entry_inside(path: &PathBuf, entries: &Vec<Entry>) -> Option<PathBuf> {
+        if entries.is_empty() { return None; }
+        let name = entries[0].name.clone();
+        let mut path = path.clone();
+        path.push(name);
+        Some(path)
     }
 
     fn collect_children(path: &Option<PathBuf>) -> Vec<Entry> {
@@ -175,13 +180,13 @@ impl System {
             EntryType::Regular => self.file_paint,
             EntryType::Directory => self.dir_paint,
             EntryType::Symlink => self.symlink_paint,
+            EntryType::Unknown => self.unknown_paint,
         };
         let paint = System::maybe_selected_paint_from(paint, selected);
         cs.set_paint(&self.window, paint);
 
         let (begin, end) = self.columns_coord[column_index];
         let column_width = end - begin;
-        // let size = entry.size.to_string();
         let size = System::human_size(entry.size);
         let name_len = entry.name.len() as i32;
         let empty_space_length = column_width - name_len - size.len() as i32;
@@ -214,14 +219,15 @@ impl System {
     }
 
     pub fn update_current_from_index(&mut self) {
-        self.current_entry = Some(self.current_siblings[self.current_index].clone());
-        let name = self.current_entry.clone().unwrap().name;
+        let current_entry = self.current_entry_ref();
+        let name = current_entry.name.clone();
+        let current_is_dir = current_entry.is_dir();
         self.current_path.as_mut().map(|path| {
             (*path).pop();
             (*path).push(name);
         });
         self.child_siblings = {
-            if self.current_entry.as_ref().unwrap().entrytype == EntryType::Directory {
+            if current_is_dir {
                 if let Some(path) = &self.current_path {
                     collect_dir(&path)
                 } else { Vec::new() }
@@ -230,7 +236,7 @@ impl System {
     }
 
     pub fn up(&mut self) {
-        if self.current_entry.is_none() { return }
+        if self.inside_empty_dir() { return }
         if self.current_index > 0 {
             self.current_index -= 1;
             self.update_current_from_index();
@@ -238,36 +244,54 @@ impl System {
     }
 
     pub fn down(&mut self) {
-        if self.current_entry.is_none() { return }
+        if self.inside_empty_dir() { return }
         if self.current_index < self.current_siblings.len() - 1 {
             self.current_index += 1;
             self.update_current_from_index();
         }
     }
 
-    // current_entry: Option<Entry>,
-    // current_siblings: Vec<Entry>,
-    // parent_siblings: Vec<Entry>,
-    // child_siblings: Vec<Entry>,
     pub fn left(&mut self) {
-        // if !is_root(&self.parent_path) {
-        //     self.current_path.as_mut().map(|path| path.pop());
-        //     self.parent_path.pop();
-        //
-        //     self.current_index = self.parent_index;
-        //     self.parent_index = index_inside(&self.parent_path);
-        //
-        //     self.child_siblings = self.current_siblings;
-        // }
+        if !is_root(&self.parent_path) {
+            self.current_path.as_mut().map(|path| path.pop());
+            self.parent_path.pop();
+
+            self.current_index = self.parent_index;
+            self.parent_index = index_inside(&self.parent_path);
+
+            // Independent
+            self.child_siblings = System::collect_children(&self.current_path);
+            self.current_siblings = collect_dir(&self.parent_path);
+            self.parent_siblings = collect_siblings_of(&self.parent_path);
+        }
     }
 
-    // pub fn fill_column(&self, index: usize, strings: Vec<String>) {
-    //     let (begin, _end) = self.columns_coord[index];
-    //     for (index, string) in strings.into_iter().enumerate() {
-    //         self.put_str(index as Coord + 1, begin + 1, string.as_str());
-    //     }
-    //     self.window.refresh();
-    // }
+    pub fn right(&mut self) {
+        if self.current_is_dir() {
+            let current_path_ref = self.current_path.as_ref().unwrap();
+            self.parent_path = self.current_path.as_ref().unwrap().to_path_buf(); // TODO: understand
+            self.current_path = System::path_of_first_entry_inside(
+                current_path_ref,
+                &self.child_siblings);
+
+            self.parent_index = self.current_index;
+            self.current_index = 0;
+
+            // Independent
+            self.child_siblings = System::collect_children(&self.current_path);
+            self.current_siblings = collect_dir(&self.parent_path);
+            self.parent_siblings = collect_siblings_of(&self.parent_path);
+        }
+    }
+
+    fn current_entry_ref(&self) -> &Entry {
+        &self.current_siblings[self.current_index]
+    }
+
+    fn current_is_dir(&self) -> bool {
+        if self.inside_empty_dir() { return false; }
+        self.current_entry_ref().is_dir()
+    }
 
     pub fn clear(&self, color_system: &mut ColorSystem) {
         color_system.set_paint(&self.window, self.primary_paint);
@@ -283,17 +307,23 @@ impl System {
 
         // Previous
         self.list_entries(&mut cs, 0, &self.parent_siblings, Some(self.parent_index));
+
         // Current
         if self.current_siblings.is_empty() {
             // TODO: write <empty>
         } else {
             self.list_entries(&mut cs, 1, &self.current_siblings, Some(self.current_index));
         }
+
         // Next
-        if self.current_entry.is_some() {
+        if !self.inside_empty_dir() {
+            // TODO: also check that current is dir,
+            // but since for now we just would display empty vector and nothing more,
+            // both are unnecessary, so might as well skip one
             self.list_entries(&mut cs, 2, &self.child_siblings, None);
         }
 
+        // TODO: remove
         if let Some(path) = self.current_path.clone() {
             cs.set_paint(&self.window, Paint{fg: Color::Red, bg: Color::Black, bold: true, underlined: false});
             self.window.mvprintw(20, 20, path.to_str().unwrap());

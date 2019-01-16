@@ -35,6 +35,7 @@ pub enum Color {
     Purple,
     Cyan,
     White,
+    Grey,
     RGB(i16, i16, i16),
 }
 
@@ -77,6 +78,7 @@ fn get_rgb(color: Color) -> RGB {
         Color::Purple => (500, 0, 500),
         Color::Cyan => (0, 1000, 1000),
         Color::White => (1000, 1000, 1000),
+        Color::Grey => (400, 400, 400),
     }
 }
 //-----------------------------------------------------------------------------
