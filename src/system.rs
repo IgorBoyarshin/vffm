@@ -1,5 +1,4 @@
 use pancurses::*;
-
 // mod coloring;
 use crate::coloring::*;
 use crate::filesystem::*;
@@ -14,6 +13,8 @@ pub struct Settings {
     pub symlink_paint: Paint,
     pub file_paint: Paint,
     pub unknown_paint: Paint,
+
+    pub cursor_vertical_gap: usize,
 }
 
 pub struct System {
@@ -39,6 +40,11 @@ pub struct System {
 
     parent_index: usize,
     current_index: usize,
+
+    cursor_vertical_gap: usize, // const
+    max_entries_displayed: usize, // const
+    parent_siblings_shift: usize,
+    current_siblings_shift: usize,
 }
 
 impl System {
@@ -50,6 +56,9 @@ impl System {
 
         let current_siblings = collect_dir(&starting_path);
         let first_entry_path = System::path_of_first_entry_inside(&starting_path, &current_siblings);
+        let parent_index = index_inside(&starting_path);
+        let current_index = 0;
+        let max_entries_displayed = height as usize - 2;
 
         System {
             window,
@@ -64,13 +73,29 @@ impl System {
 
             columns_coord: System::positions_from_ratio(settings.columns_ratio, width),
 
-            parent_index: index_inside(&starting_path),
-            current_index: 0,
+            parent_index,
+            current_index,
             current_siblings,
             parent_siblings: collect_siblings_of(&starting_path),
             child_siblings: System::collect_children(&first_entry_path),
             current_path: first_entry_path,
             parent_path: starting_path,
+
+            cursor_vertical_gap: settings.cursor_vertical_gap,
+            parent_siblings_shift: System::shift_for(parent_index,
+                         max_entries_displayed, settings.cursor_vertical_gap),
+            current_siblings_shift: System::shift_for(current_index,
+                         max_entries_displayed, settings.cursor_vertical_gap),
+            max_entries_displayed,
+        }
+    }
+
+    fn shift_for(index: usize, max: usize, gap: usize) -> usize {
+        let allowed_distance = max - gap - 1;
+        if index <= allowed_distance {
+            0
+        } else {
+            index - allowed_distance
         }
     }
 
@@ -183,13 +208,14 @@ impl System {
     }
 
     fn list_entries(&self, mut cs: &mut ColorSystem, column_index: usize,
-            entries: &Vec<Entry>, selected_index: Option<usize>) {
-        for (index, entry) in entries.into_iter().enumerate() {
+            entries: &Vec<Entry>, selected_index: Option<usize>, shift: usize) {
+        for (index, entry) in entries.into_iter().enumerate()
+                .skip(shift).take(self.max_entries_displayed) {
             let selected = match selected_index {
                 Some(i) => (i == index),
                 None    => false,
             };
-            self.list_entry(&mut cs, column_index, index, &entry, selected);
+            self.list_entry(&mut cs, column_index, index - shift, &entry, selected);
         }
     }
 
@@ -222,6 +248,14 @@ impl System {
         if self.current_index > 0 {
             self.current_index -= 1;
             self.update_current_from_index();
+
+            // Check gap
+            let left_top = self.current_index - self.current_siblings_shift;
+            let gap_exceeded = left_top < self.cursor_vertical_gap;
+            let left_undisplayed = self.current_siblings_shift > 0;
+            if gap_exceeded && left_undisplayed {
+                self.current_siblings_shift -= 1;
+            }
         }
     }
 
@@ -230,6 +264,16 @@ impl System {
         if self.current_index < self.current_siblings.len() - 1 {
             self.current_index += 1;
             self.update_current_from_index();
+
+            // Check gap
+            let displayed_top = self.current_index - self.current_siblings_shift;
+            let left_bottom = self.max_entries_displayed - displayed_top;
+            let gap_exceeded = left_bottom <= self.cursor_vertical_gap;
+            let left_to_display = self.current_siblings.len() - self.current_index;
+            let left_undisplayed = left_to_display > self.cursor_vertical_gap;
+            if gap_exceeded && left_undisplayed {
+                self.current_siblings_shift += 1;
+            }
         }
     }
 
@@ -249,6 +293,10 @@ impl System {
             self.child_siblings = System::collect_children(&self.current_path);
             self.current_siblings = collect_dir(&self.parent_path);
             self.parent_siblings = collect_siblings_of(&self.parent_path);
+
+            self.current_siblings_shift = self.parent_siblings_shift;
+            self.parent_siblings_shift = System::shift_for(self.parent_index,
+                        self.max_entries_displayed, self.cursor_vertical_gap);
         }
     }
 
@@ -267,6 +315,9 @@ impl System {
             self.child_siblings = System::collect_children(&self.current_path);
             self.current_siblings = collect_dir(&self.parent_path);
             self.parent_siblings = collect_siblings_of(&self.parent_path);
+
+            self.parent_siblings_shift = self.current_siblings_shift;
+            self.current_siblings_shift = 0;
         }
     }
 
@@ -299,14 +350,16 @@ impl System {
 
         // Previous
         let column_index = 0;
-        self.list_entries(&mut cs, column_index, &self.parent_siblings, Some(self.parent_index));
+        self.list_entries(&mut cs, column_index, &self.parent_siblings,
+                          Some(self.parent_index), self.parent_siblings_shift);
 
         // Current
         let column_index = 1;
         if self.current_siblings.is_empty() {
             self.write_empty_sign(&mut cs, column_index);
         } else {
-            self.list_entries(&mut cs, column_index, &self.current_siblings, Some(self.current_index));
+            self.list_entries(&mut cs, column_index, &self.current_siblings,
+                          Some(self.current_index), self.current_siblings_shift);
         }
 
         // Next
@@ -315,7 +368,7 @@ impl System {
             if self.current_is_dir() && self.child_siblings.is_empty() {
                 self.write_empty_sign(&mut cs, column_index);
             } else {
-                self.list_entries(&mut cs, column_index, &self.child_siblings, None);
+                self.list_entries(&mut cs, column_index, &self.child_siblings, None, 0);
             }
         }
 
