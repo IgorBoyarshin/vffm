@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::fs::{self, DirEntry};
 
 
-//------------------------
+//-----------------------------------------------------------------------------
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::fs::OpenOptions;
 use std::fs::File;
@@ -18,8 +18,7 @@ pub fn log(s: &str) {
     file.write_all(s.as_bytes());
     file.write_all(b"\n");
 }
-//------------------------
-
+//-----------------------------------------------------------------------------
 pub struct Permissions {
     owner: u32,
     group: u32,
@@ -70,7 +69,20 @@ pub fn permissions_of(path: &PathBuf) -> Permissions {
         is_directory,
     }
 }
-
+//-----------------------------------------------------------------------------
+pub fn modify_time(path: &PathBuf) -> SystemTime {
+    fs::metadata(path).expect("Could not read metadata")
+        .modified().expect("Could not read modify time")
+}
+pub fn create_time(path: &PathBuf) -> SystemTime {
+    fs::metadata(path).expect("Could not read metadata")
+        .created().expect("Could not read create time")
+}
+pub fn access_time(path: &PathBuf) -> SystemTime {
+    fs::metadata(path).expect("Could not read metadata")
+        .accessed().expect("Could not read access time")
+}
+//-----------------------------------------------------------------------------
 #[derive(PartialEq, Eq, Clone)]
 pub enum EntryType {
     Regular,
