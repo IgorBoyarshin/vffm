@@ -43,6 +43,7 @@ pub struct System {
 
     cursor_vertical_gap: usize, // const
     max_entries_displayed: usize, // const
+    entries_display_begin: i32, // const
     parent_siblings_shift: usize,
     current_siblings_shift: usize,
 }
@@ -58,7 +59,7 @@ impl System {
         let first_entry_path = System::path_of_first_entry_inside(&starting_path, &current_siblings);
         let parent_index = index_inside(&starting_path);
         let current_index = 0;
-        let max_entries_displayed = height as usize - 2;
+        let max_entries_displayed = height as usize - 4; // gap+border+border+gap
 
         System {
             window,
@@ -87,6 +88,7 @@ impl System {
             current_siblings_shift: System::shift_for(current_index,
                          max_entries_displayed, settings.cursor_vertical_gap),
             max_entries_displayed,
+            entries_display_begin: 2, // gap+border
         }
     }
 
@@ -185,7 +187,7 @@ impl System {
     }
 
     fn list_entry(&self, cs: &mut ColorSystem, column_index: usize,
-            entry_index: usize, entry: &Entry, selected: bool) {
+            y: usize, entry: &Entry, selected: bool) {
         let paint = match entry.entrytype {
             EntryType::Regular => self.file_paint,
             EntryType::Directory => self.dir_paint,
@@ -200,7 +202,7 @@ impl System {
         let size = System::human_size(entry.size);
         let name_len = entry.name.len() as i32;
         let empty_space_length = column_width - name_len - size.len() as i32;
-        let y = entry_index as Coord + 1;
+        let y = y as Coord + self.entries_display_begin;
         self.window.mvprintw(y, begin + 1, &entry.name);
         self.window.mv(y, begin + 1 + name_len);
         self.window.hline(' ', empty_space_length);
@@ -383,30 +385,30 @@ impl System {
 
     fn draw_column(&self, color_system: &mut ColorSystem, x: Coord) {
         color_system.set_paint(&self.window, self.primary_paint);
-        self.window.mv(0, x);
-        self.window.addch(ACS_TTEE());
         self.window.mv(1, x);
-        self.window.vline(ACS_VLINE(), self.height-2);
-        self.window.mv(self.height-1, x);
+        self.window.addch(ACS_TTEE());
+        self.window.mv(2, x);
+        self.window.vline(ACS_VLINE(), self.height-4);
+        self.window.mv(self.height-2, x);
         self.window.addch(ACS_BTEE());
     }
 
     fn draw_borders(&self, color_system: &mut ColorSystem) {
         color_system.set_paint(&self.window, self.primary_paint);
 
-        self.window.mv(0, 0);
+        self.window.mv(1, 0);
         self.window.addch(ACS_ULCORNER());
         self.window.hline(ACS_HLINE(), self.width-2);
-        self.window.mv(0, self.width-1);
+        self.window.mv(1, self.width-1);
         self.window.addch(ACS_URCORNER());
 
-        self.window.mv(self.height-1, 0);
+        self.window.mv(self.height-2, 0);
         self.window.addch(ACS_LLCORNER());
         self.window.hline(ACS_HLINE(), self.width-2);
-        self.window.mv(self.height-1, self.width-1);
+        self.window.mv(self.height-2, self.width-1);
         self.window.addch(ACS_LRCORNER());
 
-        for y in 1..self.height-1 {
+        for y in 2..self.height-2 {
             self.window.mv(y, 0);
             self.window.addch(ACS_VLINE());
             self.window.mv(y, self.width-1);
