@@ -34,6 +34,7 @@ fn main() {
         },
         starting_path,
     );
+
     system.clear(&mut color_system);
     system.draw(&mut color_system);
 

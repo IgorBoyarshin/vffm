@@ -8,6 +8,7 @@ use std::fs::{self, DirEntry};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::fs::OpenOptions;
 use std::fs::File;
+use std::os::unix::fs::PermissionsExt;
 use std::io::Write;
 
 pub fn log(s: &str) {
@@ -18,6 +19,57 @@ pub fn log(s: &str) {
     file.write_all(b"\n");
 }
 //------------------------
+
+pub struct Permissions {
+    owner: u32,
+    group: u32,
+    world: u32,
+    is_directory: bool,
+}
+
+impl Permissions {
+    pub fn string_representation(&self) -> String {
+        let dir = (if self.is_directory {"d"} else {"-"}).to_string();
+        let owner = permission_number_to_string_representation(self.owner);
+        let group = permission_number_to_string_representation(self.group);
+        let world = permission_number_to_string_representation(self.world);
+        dir + &owner + &group + &world
+    }
+}
+
+fn permission_number_to_string_representation(mut n: u32) -> String {
+    let mut s = String::new();
+    if n >= 4 {
+        s.push('r');
+        n -= 4;
+    } else { s.push('-'); }
+    if n >= 2 {
+        s.push('w');
+        n -= 2;
+    } else { s.push('-'); }
+    if n >= 1 {
+        s.push('x');
+        n -= 1;
+    } else { s.push('-'); }
+    assert!(n == 0);
+
+    s
+}
+
+pub fn permissions_of(path: &PathBuf) -> Permissions {
+    let metadata = fs::metadata(path).expect("Cou ld not read metadata");
+    let is_directory = metadata.is_dir();
+    let field = metadata.permissions().mode();
+    let world = field % 8;
+    let group = (field / 8) % 8;
+    let owner = (field / (8*8)) % 8;
+    Permissions {
+        owner,
+        group,
+        world,
+        is_directory,
+    }
+}
 
 #[derive(PartialEq, Eq, Clone)]
 pub enum EntryType {

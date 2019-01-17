@@ -41,6 +41,8 @@ pub struct System {
     parent_index: usize,
     current_index: usize,
 
+    current_permissions: String,
+
     cursor_vertical_gap: usize, // const
     max_entries_displayed: usize, // const
     entries_display_begin: i32, // const
@@ -79,6 +81,7 @@ impl System {
             current_siblings,
             parent_siblings: collect_siblings_of(&starting_path),
             child_siblings: System::collect_children(&first_entry_path),
+            current_permissions: System::string_permissions_for_path(&first_entry_path),
             current_path: first_entry_path,
             parent_path: starting_path,
 
@@ -90,6 +93,13 @@ impl System {
             max_entries_displayed,
             entries_display_begin: 2, // gap+border
         }
+    }
+
+    fn string_permissions_for_path(path: &Option<PathBuf>) -> String {
+        if path.is_some() {
+            permissions_of(&path.as_ref().unwrap())
+                .string_representation()
+        } else { "".to_string() }
     }
 
     fn shift_for(index: usize, max: usize, gap: usize) -> usize {
@@ -243,6 +253,8 @@ impl System {
                 } else { Vec::new() }
             } else { Vec::new() }
         };
+        self.current_permissions =
+            System::string_permissions_for_path(&self.current_path);
     }
 
     pub fn up(&mut self) {
@@ -287,6 +299,8 @@ impl System {
                 self.current_path.as_mut().map(|path| path.pop());
             }
             self.parent_path.pop();
+            self.current_permissions =
+                System::string_permissions_for_path(&self.current_path);
 
             self.current_index = self.parent_index;
             self.parent_index = index_inside(&self.parent_path);
@@ -309,6 +323,8 @@ impl System {
             self.current_path = System::path_of_first_entry_inside(
                 current_path_ref,
                 &self.child_siblings);
+            self.current_permissions =
+                System::string_permissions_for_path(&self.current_path);
 
             self.parent_index = self.current_index;
             self.current_index = 0;
@@ -380,6 +396,12 @@ impl System {
                                                 bold: false, underlined: false});
             self.window.mvprintw(0, 0,
                          self.current_path.as_ref().unwrap().to_str().unwrap());
+        }
+
+        if self.current_path.is_some() {
+            cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
+                                                bold: false, underlined: false});
+            self.window.mvprintw(self.height - 1, 0, &self.current_permissions);
         }
 
         self.window.refresh();
