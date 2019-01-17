@@ -54,6 +54,6 @@ fn main() {
         }
         system.clear(&mut color_system);
         system.draw(&mut color_system);
-        thread::sleep_ms(5);
+        thread::sleep_ms(10);
     };
 }

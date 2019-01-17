@@ -344,7 +344,7 @@ impl System {
     fn write_empty_sign(&self, cs: &mut ColorSystem, column_index: usize) {
         cs.set_paint(&self.window, Paint{fg: Color::Black, bg: Color::Red, bold: true, underlined: false});
         let (begin, _) = self.columns_coord[column_index];
-        self.window.mvprintw(1, begin + 1, "empty");
+        self.window.mvprintw(self.entries_display_begin, begin + 1, "empty");
     }
 
     pub fn draw(&self, mut cs: &mut ColorSystem) {
@@ -374,11 +374,13 @@ impl System {
             }
         }
 
-        // TODO: remove
-        // if let Some(path) = self.current_path.clone() {
-        //     cs.set_paint(&self.window, Paint{fg: Color::Red, bg: Color::Black, bold: true, underlined: false});
-        //     self.window.mvprintw(20, 20, path.to_str().unwrap());
-        // }
+        // Current path
+        if !self.inside_empty_dir() {
+            cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
+                                                bold: false, underlined: false});
+            self.window.mvprintw(0, 0,
+                         self.current_path.as_ref().unwrap().to_str().unwrap());
+        }
 
         self.window.refresh();
     }
