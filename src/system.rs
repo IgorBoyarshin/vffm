@@ -196,6 +196,20 @@ impl System {
         "<>".to_string()
     }
 
+    fn truncate_string(string: &str, max_length: i32) -> String {
+        if string.len() > max_length as usize {
+            let delimiter = "...";
+            let leave_at_end = 5;
+            let total_end_len = leave_at_end + delimiter.len();
+            let start = max_length as usize - total_end_len;
+            let mut new = string.clone().to_string();
+            new.replace_range(start..(string.len() - leave_at_end), delimiter);
+            new
+        } else {
+            string.clone().to_string()
+        }
+    }
+
     fn list_entry(&self, cs: &mut ColorSystem, column_index: usize,
             y: usize, entry: &Entry, selected: bool) {
         let paint = match entry.entrytype {
@@ -210,13 +224,23 @@ impl System {
         let (begin, end) = self.columns_coord[column_index];
         let column_width = end - begin;
         let size = System::human_size(entry.size);
+        let size_len = size.len();
         let name_len = entry.name.len() as i32;
-        let empty_space_length = column_width - name_len - size.len() as i32;
+        let empty_space_length = column_width - name_len - size_len as i32;
         let y = y as Coord + self.entries_display_begin;
-        self.window.mvprintw(y, begin + 1, &entry.name);
-        self.window.mv(y, begin + 1 + name_len);
-        self.window.hline(' ', empty_space_length);
-        self.window.mvprintw(y, begin + 1 + name_len + empty_space_length, size);
+        if empty_space_length < 1 {
+            // everything doesn't fit => sacrifice Size and truncate the name
+            let text = System::truncate_string(&entry.name, column_width);
+            let leftover = column_width - text.len() as i32;
+            self.window.mvprintw(y, begin + 1, &text);
+            self.window.mv(y, begin + 1 + text.len() as i32);
+            self.window.hline(' ', leftover);
+        } else { // everything fits OK
+            self.window.mvprintw(y, begin + 1, &entry.name);
+            self.window.mv(y, begin + 1 + name_len);
+            self.window.hline(' ', empty_space_length);
+            self.window.mvprintw(y, begin + 1 + name_len + empty_space_length, size);
+        }
     }
 
     fn list_entries(&self, mut cs: &mut ColorSystem, column_index: usize,
