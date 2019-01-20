@@ -387,6 +387,14 @@ impl System {
         self.window.mvprintw(self.entries_display_begin, begin + 1, "empty");
     }
 
+    pub fn draw_command(&self, cs: &mut ColorSystem, command: &str) {
+        cs.set_paint(&self.window, Paint{fg: Color::White, bg: Color::Black,
+                                            bold: false, underlined: false});
+        let space = if command.len() <= 3 { 3 } else { command.len() };
+        self.window.mvprintw(self.height - 1, self.width - 1 - space as i32, command);
+        self.window.mv(0,0); // Since can't hide the cursor. For it not to distract us
+    }
+
     pub fn draw(&self, mut cs: &mut ColorSystem) {
         self.draw_borders(&mut cs);
 

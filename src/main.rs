@@ -103,12 +103,15 @@ fn main() {
     while !terminated {
         system.clear(&mut color_system);
         system.draw(&mut color_system);
+        system.draw_command(&mut color_system, &current_input);
 
         if let Some(Input::Character(c)) = system.get() {
             if current_mode == Mode::AwaitingCommand {
                 current_input.push(c);
                 found_matches = combinations_that_start_with(&current_input, found_matches);
+
                 // Display matches
+
                 if exact_match(&found_matches, &current_input) {
                     let (_, command) = found_matches.pop().unwrap();
                     match command {
