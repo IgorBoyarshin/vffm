@@ -1,5 +1,5 @@
 use pancurses::*;
-// mod coloring;
+
 use crate::coloring::*;
 use crate::filesystem::*;
 use crate::input::*;
@@ -7,6 +7,11 @@ use crate::input::*;
 use std::path::PathBuf;
 
 type Coord = i32;
+
+pub enum SortingType {
+    Lexicographically,
+    Time,
+}
 
 pub struct Settings {
     pub columns_ratio: Vec<u32>,
@@ -49,6 +54,8 @@ pub struct System {
     entries_display_begin: i32, // const
     parent_siblings_shift: usize,
     current_siblings_shift: usize,
+
+    sorting_type: SortingType,
 }
 
 impl System {
@@ -93,7 +100,17 @@ impl System {
                          max_entries_displayed, settings.cursor_vertical_gap),
             max_entries_displayed,
             entries_display_begin: 2, // gap+border
+
+            sorting_type: SortingType::Lexicographically,
         }
+    }
+
+    fn sort(mut entries: Vec<Entry>, sorting_type: &SortingType) -> Vec<Entry> {
+        match sorting_type {
+            SortingType::Lexicographically => entries.sort_by(|a, b| a.name.cmp(&b.name)),
+            SortingType::Time => {},
+        }
+        entries
     }
 
     fn string_permissions_for_path(path: &Option<PathBuf>) -> String {
@@ -230,7 +247,7 @@ impl System {
         let empty_space_length = column_width - name_len - size_len as i32;
         let y = y as Coord + self.entries_display_begin;
         if empty_space_length < 1 {
-            // everything doesn't fit => sacrifice Size and truncate the name
+            // everything doesn't fit => sacrifice Size and truncate the Name
             let text = System::truncate_string(&entry.name, column_width);
             let leftover = column_width - text.len() as i32;
             self.window.mvprintw(y, begin + 1, &text);
@@ -274,7 +291,7 @@ impl System {
         self.child_siblings = {
             if current_is_dir {
                 if let Some(path) = &self.current_path {
-                    collect_dir(&path)
+                    System::sort(collect_dir(&path), &self.sorting_type)
                 } else { Vec::new() }
             } else { Vec::new() }
         };
@@ -331,9 +348,9 @@ impl System {
             self.parent_index = index_inside(&self.parent_path);
 
             // Independent
-            self.child_siblings = System::collect_children(&self.current_path);
-            self.current_siblings = collect_dir(&self.parent_path);
-            self.parent_siblings = collect_siblings_of(&self.parent_path);
+            self.child_siblings = System::sort(System::collect_children(&self.current_path), &self.sorting_type);
+            self.current_siblings = System::sort(collect_dir(&self.parent_path), &self.sorting_type);
+            self.parent_siblings = System::sort(collect_siblings_of(&self.parent_path), &self.sorting_type);
 
             self.current_siblings_shift = self.parent_siblings_shift;
             self.parent_siblings_shift = System::shift_for(self.parent_index,
@@ -355,9 +372,9 @@ impl System {
             self.current_index = 0;
 
             // Independent
-            self.child_siblings = System::collect_children(&self.current_path);
-            self.current_siblings = collect_dir(&self.parent_path);
-            self.parent_siblings = collect_siblings_of(&self.parent_path);
+            self.child_siblings = System::sort(System::collect_children(&self.current_path), &self.sorting_type);
+            self.current_siblings = System::sort(collect_dir(&self.parent_path), &self.sorting_type);
+            self.parent_siblings = System::sort(collect_siblings_of(&self.parent_path), &self.sorting_type);
 
             self.parent_siblings_shift = self.current_siblings_shift;
             self.current_siblings_shift = 0;
@@ -387,15 +404,6 @@ impl System {
         let (begin, _) = self.columns_coord[column_index];
         self.window.mvprintw(self.entries_display_begin, begin + 1, "empty");
     }
-
-    // pub fn draw_command(&self, cs: &mut ColorSystem, command: &str) {
-    //     cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
-    //                                         bold: false, underlined: false});
-    //     let max_len = max_combination_len();
-    //     let space = if command.len() <= max_len { max_len } else { command.len() };
-    //     self.window.mvprintw(self.height - 1, self.width - 1 - space as i32, command);
-    //     self.window.mv(0,0); // Since can't hide the cursor. For it not to distract us
-    // }
 
     pub fn draw_available_matches(&self, cs: &mut ColorSystem,
             matches: &Matches, completion_count: usize) {
