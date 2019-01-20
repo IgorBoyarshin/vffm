@@ -70,17 +70,20 @@ pub fn permissions_of(path: &PathBuf) -> Permissions {
     }
 }
 //-----------------------------------------------------------------------------
-pub fn modify_time(path: &PathBuf) -> SystemTime {
+pub fn modify_time(path: &PathBuf) -> u64 {
     fs::metadata(path).expect("Could not read metadata")
         .modified().expect("Could not read modify time")
+        .duration_since(UNIX_EPOCH).unwrap().as_secs()
 }
-pub fn create_time(path: &PathBuf) -> SystemTime {
+pub fn create_time(path: &PathBuf) -> u64 {
     fs::metadata(path).expect("Could not read metadata")
         .created().expect("Could not read create time")
+        .duration_since(UNIX_EPOCH).unwrap().as_secs()
 }
-pub fn access_time(path: &PathBuf) -> SystemTime {
+pub fn access_time(path: &PathBuf) -> u64 {
     fs::metadata(path).expect("Could not read metadata")
         .accessed().expect("Could not read access time")
+        .duration_since(UNIX_EPOCH).unwrap().as_secs()
 }
 //-----------------------------------------------------------------------------
 #[derive(PartialEq, Eq, Clone)]
@@ -96,6 +99,7 @@ pub struct Entry {
     pub entrytype: EntryType,
     pub name: String,
     pub size: u64,
+    pub time_modified: u64,
 }
 
 impl Entry {
@@ -130,7 +134,8 @@ pub fn collect_siblings_of(path: &PathBuf) -> Vec<Entry> {
         vec![Entry {
             entrytype: EntryType::Directory,
             name: "/".to_string(),
-            size: 4096
+            size: 4096,
+            time_modified: 0,
         }]
     } else {
         let mut path = path.clone();
@@ -144,6 +149,8 @@ fn into_entry(dir_entry: DirEntry) -> Entry {
     let name = dir_entry.file_name().to_str().unwrap().to_string();
     let meta = dir_entry.metadata().expect(&format!("Could not read metadata for {}", name));
     let size = meta.len();
+    // let time_modified = meta.modified().expect("Could not read modified time")
+    //     .duration_since(UNIX_EPOCH).unwrap().as_secs();
     let entrytype = {
         let ft = dir_entry.file_type().expect("Could not retrieve filetype");
         let entrytype: EntryType;
@@ -164,6 +171,7 @@ fn into_entry(dir_entry: DirEntry) -> Entry {
         entrytype,
         name,
         size,
+        time_modified: 0,
     }
 }
 

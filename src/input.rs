@@ -1,3 +1,10 @@
+#[derive(Debug, Copy, Clone)]
+pub enum SortingType {
+    Lexicographically,
+    TimeModified,
+    Any,
+}
+
 pub type Combination = String;
 pub enum Command {
     Terminate,
@@ -6,6 +13,7 @@ pub enum Command {
     Down,
     Left,
     Right,
+    Sort(SortingType),
     // NewTab,
     // CloseTab,
     // NextTab,
@@ -23,6 +31,9 @@ pub fn generate_possible_inputs() -> Vec<(Combination, Command)> {
     inputs.push(("j".to_string(), Command::Down));
     inputs.push(("k".to_string(), Command::Up));
     inputs.push(("l".to_string(), Command::Right));
+    inputs.push(("sl".to_string(), Command::Sort(SortingType::Lexicographically)));
+    inputs.push(("st".to_string(), Command::Sort(SortingType::TimeModified)));
+    inputs.push(("sa".to_string(), Command::Sort(SortingType::Any)));
     inputs
 }
 
@@ -34,6 +45,7 @@ pub fn description_of(command: &Command) -> String {
         Command::Down => "Navigate down one entry in the list".to_string(),
         Command::Left => "Navigate to the parent directory".to_string(),
         Command::Right => "Navigate into the child directory or file".to_string(),
+        Command::Sort(sorting_type) => format!("Sort entries {:?}", sorting_type),
     }
 }
 

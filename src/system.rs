@@ -8,11 +8,6 @@ use std::path::PathBuf;
 
 type Coord = i32;
 
-pub enum SortingType {
-    Lexicographically,
-    Time,
-}
-
 pub struct Settings {
     pub columns_ratio: Vec<u32>,
     pub dir_paint: Paint,
@@ -101,14 +96,19 @@ impl System {
             max_entries_displayed,
             entries_display_begin: 2, // gap+border
 
-            sorting_type: SortingType::Lexicographically,
+            sorting_type: SortingType::Any,
         }
+    }
+
+    pub fn change_sorting_type(&mut self, new_sorting_type: SortingType) {
+        self.sorting_type = new_sorting_type;
     }
 
     fn sort(mut entries: Vec<Entry>, sorting_type: &SortingType) -> Vec<Entry> {
         match sorting_type {
             SortingType::Lexicographically => entries.sort_by(|a, b| a.name.cmp(&b.name)),
-            SortingType::Time => {},
+            SortingType::TimeModified => entries.sort_by(|a, b| a.time_modified.cmp(&b.time_modified)),
+            SortingType::Any => {},
         }
         entries
     }

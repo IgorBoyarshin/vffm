@@ -82,6 +82,7 @@ fn main() {
                         Command::Down => system.down(),
                         Command::Left => system.left(),
                         Command::Right => system.right(),
+                        Command::Sort(sorting_type) => system.change_sorting_type(*sorting_type),
                         Command::GoTo(_path) => {},
                     }
                 }
