@@ -2,6 +2,7 @@ use pancurses::*;
 // mod coloring;
 use crate::coloring::*;
 use crate::filesystem::*;
+use crate::input::*;
 
 use std::path::PathBuf;
 
@@ -387,12 +388,52 @@ impl System {
         self.window.mvprintw(self.entries_display_begin, begin + 1, "empty");
     }
 
-    pub fn draw_command(&self, cs: &mut ColorSystem, command: &str) {
-        cs.set_paint(&self.window, Paint{fg: Color::White, bg: Color::Black,
+    // pub fn draw_command(&self, cs: &mut ColorSystem, command: &str) {
+    //     cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
+    //                                         bold: false, underlined: false});
+    //     let max_len = max_combination_len();
+    //     let space = if command.len() <= max_len { max_len } else { command.len() };
+    //     self.window.mvprintw(self.height - 1, self.width - 1 - space as i32, command);
+    //     self.window.mv(0,0); // Since can't hide the cursor. For it not to distract us
+    // }
+
+    pub fn draw_available_matches(&self, cs: &mut ColorSystem,
+            matches: &Matches, completion_count: usize) {
+        if matches.is_empty() { return; }
+        cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
                                             bold: false, underlined: false});
-        let space = if command.len() <= 3 { 3 } else { command.len() };
-        self.window.mvprintw(self.height - 1, self.width - 1 - space as i32, command);
-        self.window.mv(0,0); // Since can't hide the cursor. For it not to distract us
+        let y = self.height - 2 - matches.len() as i32 - 1;
+        self.window.mv(y, 0);
+        self.window.hline(ACS_HLINE(), self.width);
+        self.window.mv(self.height - 2, 0);
+        self.window.hline(ACS_HLINE(), self.width);
+        for (i, (combination, command)) in matches.iter().enumerate() {
+            let y = y + 1 + i as i32;
+            let max_len = max_combination_len() as i32;
+
+            // Combination
+            let (completed_part, uncompleted_part) = combination.split_at(completion_count);
+            // Completed part
+            cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
+                                                bold: true, underlined: false});
+            self.window.mvprintw(y, 0, &completed_part);
+            // Uncompleted part
+            cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
+                                                bold: false, underlined: false});
+            self.window.printw(&uncompleted_part);
+            // Space till description
+            let left = max_len - combination.len() as i32;
+            self.window.hline(' ', left);
+
+            // Command description
+            cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
+                                                bold: false, underlined: false});
+            let description = description_of(&command);
+            self.window.mvprintw(y, max_len as i32, &description);
+            // Space till end
+            let left = self.width - max_len - description.len() as i32;
+            self.window.hline(' ', left);
+        }
     }
 
     pub fn draw(&self, mut cs: &mut ColorSystem) {
@@ -424,14 +465,15 @@ impl System {
 
         // Current path
         if !self.inside_empty_dir() {
-            cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
+            cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Black,
                                                 bold: false, underlined: false});
             self.window.mvprintw(0, 0,
                          self.current_path.as_ref().unwrap().to_str().unwrap());
         }
 
+        // Current permissions
         if self.current_path.is_some() {
-            cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
+            cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Black,
                                                 bold: false, underlined: false});
             self.window.mvprintw(self.height - 1, 0, &self.current_permissions);
         }

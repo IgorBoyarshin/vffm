@@ -14,6 +14,9 @@ use crate::system::*;
 mod filesystem;
 use crate::filesystem::*;
 
+mod input;
+use crate::input::*;
+
 // use std::path::Path;
 // use std::fs::{self};
 
@@ -24,51 +27,10 @@ enum Mode {
     AwaitingCommand,
 }
 
-type Combination = String;
-enum Command {
-    Terminate,
-    GoTo(String),
-    Up,
-    Down,
-    Left,
-    Right,
-    // NewTab,
-    // CloseTab,
-    // NextTab,
-    // PreviousTab,
-}
-
-fn generate_possible_inputs() -> Vec<(Combination, Command)> {
-    let mut inputs = Vec::new();
-    inputs.push(("qwq".to_string(), Command::Terminate));
-    inputs.push(("hh".to_string(), Command::Left));
-    inputs.push(("j".to_string(), Command::Down));
-    inputs.push(("k".to_string(), Command::Up));
-    inputs.push(("l".to_string(), Command::Right));
-    inputs
-}
-
 fn vec_of_refs<'a, T>(array: &'a Vec<T>) -> Vec<&'a T> {
     let mut vec = Vec::new();
     for entry in array { vec.push(entry); }
     vec
-}
-
-fn combinations_that_start_with<'a>(slice: &str, array: Vec<&'a(Combination, Command)>)
-        -> Vec<&'a (Combination, Command)> {
-    let mut combinations = Vec::new();
-    let str1 = slice.as_bytes();
-    let size = slice.len();
-    'entries: for entry in array {
-        let str2 = (&entry.0).as_bytes();
-        if size > str2.len() { continue 'entries; }
-        for i in 0..size {
-            if str1[i] != str2[i] { continue 'entries; }
-        }
-        // Complete match up to the size => take it
-        combinations.push(entry);
-    }
-    combinations
 }
 
 
@@ -94,7 +56,7 @@ fn main() {
     let possible_inputs = generate_possible_inputs();
     let mut current_input = String::new();
     let mut found_matches = vec_of_refs(&possible_inputs);
-    let exact_match = |found_matches: &Vec<&(Combination, Command)>, current_input: &str| {
+    let exact_match = |found_matches: &Matches, current_input: &str| {
         (found_matches.len() == 1) &&
             (found_matches[0].0.len() == current_input.len())
     };
@@ -103,7 +65,11 @@ fn main() {
     while !terminated {
         system.clear(&mut color_system);
         system.draw(&mut color_system);
-        system.draw_command(&mut color_system, &current_input);
+        // system.draw_command(&mut color_system, &current_input);
+        if current_input.len() > 0 && found_matches.len() >= 1 {
+            // If the user is trying some input and there matches
+            system.draw_available_matches(&mut color_system, &found_matches, current_input.len());
+        }
 
         if let Some(Input::Character(c)) = system.get() {
             if current_mode == Mode::AwaitingCommand {
