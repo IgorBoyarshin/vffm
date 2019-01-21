@@ -122,7 +122,7 @@ impl Entry {
 }
 
 
-pub fn collect_dir(path: &PathBuf) -> Vec<Entry> {
+pub fn collect_maybe_dir(path: &PathBuf) -> Vec<Entry> {
     let mut vec = Vec::new();
     if !path.is_dir() { return vec; }
     let entries = fs::read_dir(path);
@@ -147,7 +147,7 @@ pub fn collect_siblings_of(path: &PathBuf) -> Vec<Entry> {
     } else {
         let mut path = path.clone();
         path.pop();
-        collect_dir(&path)
+        collect_maybe_dir(&path)
     }
 }
 

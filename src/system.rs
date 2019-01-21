@@ -60,7 +60,7 @@ impl System {
         let primary_paint =
             Paint{fg: Color::White, bg: Color::Black, bold: false, underlined: false};
 
-        let current_siblings = collect_dir(&starting_path);
+        let current_siblings = collect_maybe_dir(&starting_path);
         let parent_siblings = collect_siblings_of(&starting_path);
         let first_entry_path = System::path_of_first_entry_inside(&starting_path, &current_siblings);
         let parent_index = index_inside(&starting_path);
@@ -73,6 +73,8 @@ impl System {
         let current_siblings_shift = System::siblings_shift_for(
                 settings.cursor_vertical_gap, max_entries_displayed,
                 current_index, current_siblings.len(), None);
+
+        let sorting_type = SortingType::Any;
 
         System {
             window,
@@ -91,7 +93,7 @@ impl System {
             current_index,
             current_siblings,
             parent_siblings,
-            child_siblings: System::collect_children(&first_entry_path),
+            child_siblings: System::collect_sorted_children_of(&first_entry_path, &sorting_type),
             current_permissions: System::string_permissions_for_path(&first_entry_path),
             current_path: first_entry_path,
             parent_path: starting_path,
@@ -108,7 +110,7 @@ impl System {
             max_entries_displayed,
             entries_display_begin: 2, // gap+border
 
-            sorting_type: SortingType::Any,
+            sorting_type,
         }
     }
 //-----------------------------------------------------------------------------
@@ -126,19 +128,22 @@ impl System {
     }
 //-----------------------------------------------------------------------------
     fn string_permissions_for_path(path: &Option<PathBuf>) -> String {
-        if path.is_some() {
-            permissions_of(&path.as_ref().unwrap())
-                .string_representation()
+        if let Some(path) = path {
+            permissions_of(path).string_representation()
         } else { "".to_string() }
     }
 
-    fn current_entry_ref(&self) -> &Entry {
+    fn get_current_permissions(&mut self) -> String {
+        System::string_permissions_for_path(&self.current_path)
+    }
+
+    fn unsafe_current_entry_ref(&self) -> &Entry {
         &self.current_siblings[self.current_index]
     }
 
     fn current_is_dir(&self) -> bool {
         if self.inside_empty_dir() { return false; }
-        self.current_entry_ref().is_dir()
+        self.unsafe_current_entry_ref().is_dir()
     }
 
     fn inside_empty_dir(&self) -> bool {
@@ -152,30 +157,31 @@ impl System {
         path.push(name);
         Some(path)
     }
-
-    fn collect_children(path: &Option<PathBuf>) -> Vec<Entry> {
-        if let Some(path) = path {
-            collect_dir(&path)
-        } else { Vec::new() }
-    }
 //-----------------------------------------------------------------------------
-    fn update_current_from_index(&mut self) {
-        let current_entry = self.current_entry_ref();
-        let name = current_entry.name.clone();
-        let current_is_dir = current_entry.is_dir();
+    fn update_last_part_of_current_path_by_index(&mut self) {
+        let name = self.unsafe_current_entry_ref().name.clone();
         self.current_path.as_mut().map(|path| {
             (*path).pop();
             (*path).push(name);
         });
-        self.child_siblings = {
-            if current_is_dir {
-                if let Some(path) = &self.current_path {
-                    System::sort(collect_dir(&path), &self.sorting_type)
-                } else { Vec::new() }
-            } else { Vec::new() }
-        };
-        self.current_permissions =
-            System::string_permissions_for_path(&self.current_path);
+    }
+
+    fn collect_sorted_siblings_of_parent(&self) -> Vec<Entry> {
+        System::sort(collect_siblings_of(&self.parent_path), &self.sorting_type)
+    }
+
+    fn collect_sorted_children_of(path: &Option<PathBuf>, sorting_type: &SortingType) -> Vec<Entry> {
+        if let Some(path) = path {
+            System::sort(collect_maybe_dir(&path), sorting_type)
+        } else { Vec::new() }
+    }
+
+    fn collect_sorted_children_of_current(&self) -> Vec<Entry> {
+        System::collect_sorted_children_of(&self.current_path, &self.sorting_type)
+    }
+
+    fn collect_sorted_children_of_parent(&self) -> Vec<Entry> {
+        System::sort(collect_maybe_dir(&self.parent_path), &self.sorting_type)
     }
 
     // The display is guaranteed to be able to contain 2*gap (accomplished in settings)
@@ -207,25 +213,37 @@ impl System {
         }
     }
 
-    fn update_parent_siblings_shift(&mut self) {
-        self.parent_siblings_shift = System::siblings_shift_for(
+    fn recalculate_parent_siblings_shift(&mut self) -> usize {
+        System::siblings_shift_for(
             self.cursor_vertical_gap, self.max_entries_displayed,
-            self.parent_index, self.parent_siblings.len(), None);
+            self.parent_index, self.parent_siblings.len(), None)
     }
 
-    fn update_current_siblings_shift(&mut self) {
-        self.current_siblings_shift = System::siblings_shift_for(
+    fn recalculate_current_siblings_shift(&mut self) -> usize {
+        System::siblings_shift_for(
             self.cursor_vertical_gap, self.max_entries_displayed,
-            self.current_index, self.current_siblings.len(), Some(self.current_siblings_shift));
+            self.current_index, self.current_siblings.len(), Some(self.current_siblings_shift))
+    }
+
+    fn common_up_down(&mut self) {
+        self.update_last_part_of_current_path_by_index();
+        self.current_permissions = self.get_current_permissions();
+        self.child_siblings = self.collect_sorted_children_of_current();
+        self.current_siblings_shift = self.recalculate_current_siblings_shift();
+    }
+
+    fn common_left_right(&mut self) {
+        self.current_permissions = self.get_current_permissions();
+        self.child_siblings = self.collect_sorted_children_of_current();
+        self.current_siblings = self.collect_sorted_children_of_parent();
+        self.parent_siblings = self.collect_sorted_siblings_of_parent();
     }
 //-----------------------------------------------------------------------------
     pub fn up(&mut self) {
         if self.inside_empty_dir() { return }
         if self.current_index > 0 {
             self.current_index -= 1;
-
-            self.update_current_from_index();
-            self.update_current_siblings_shift();
+            self.common_up_down();
         }
     }
 
@@ -233,9 +251,7 @@ impl System {
         if self.inside_empty_dir() { return }
         if self.current_index < self.current_siblings.len() - 1 {
             self.current_index += 1;
-
-            self.update_current_from_index();
-            self.update_current_siblings_shift();
+            self.common_up_down();
         }
     }
 
@@ -247,50 +263,27 @@ impl System {
                 self.current_path.as_mut().map(|path| path.pop());
             }
             self.parent_path.pop();
-            self.current_permissions =
-                System::string_permissions_for_path(&self.current_path);
 
-            // Independent
-            {
-                self.child_siblings = System::sort(
-                    System::collect_children(&self.current_path), &self.sorting_type);
-                self.current_siblings = System::sort(
-                    collect_dir(&self.parent_path), &self.sorting_type);
-                self.parent_siblings = System::sort(
-                    collect_siblings_of(&self.parent_path), &self.sorting_type);
-            }
+            self.common_left_right();
 
             self.current_index = self.parent_index;
             self.parent_index = index_inside(&self.parent_path);
-
             self.current_siblings_shift = self.parent_siblings_shift;
-            self.update_parent_siblings_shift();
+            self.parent_siblings_shift = self.recalculate_parent_siblings_shift();
         }
     }
 
     pub fn right(&mut self) {
         if self.current_is_dir() {
             let current_path_ref = self.current_path.as_ref().unwrap();
-            self.parent_path = self.current_path.as_ref().unwrap().to_path_buf();
+            self.parent_path = current_path_ref.to_path_buf();
             self.current_path = System::path_of_first_entry_inside(
-                current_path_ref,
-                &self.child_siblings);
-            self.current_permissions =
-                System::string_permissions_for_path(&self.current_path);
+                current_path_ref, &self.child_siblings);
 
-            // Independent
-            {
-                self.child_siblings = System::sort(
-                    System::collect_children(&self.current_path), &self.sorting_type);
-                self.current_siblings = System::sort(
-                    collect_dir(&self.parent_path), &self.sorting_type);
-                self.parent_siblings = System::sort(
-                    collect_siblings_of(&self.parent_path), &self.sorting_type);
-            }
+            self.common_left_right();
 
             self.parent_index = self.current_index;
             self.current_index = 0;
-
             self.parent_siblings_shift = self.current_siblings_shift;
             self.current_siblings_shift = 0;
         }
@@ -360,7 +353,7 @@ impl System {
 
         // Current
         let column_index = 1;
-        if self.current_siblings.is_empty() {
+        if self.inside_empty_dir() {
             self.draw_empty_sign(&mut cs, column_index);
         } else {
             self.list_entries(&mut cs, column_index, &self.current_siblings,
