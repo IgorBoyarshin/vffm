@@ -61,10 +61,18 @@ impl System {
             Paint{fg: Color::White, bg: Color::Black, bold: false, underlined: false};
 
         let current_siblings = collect_dir(&starting_path);
+        let parent_siblings = collect_siblings_of(&starting_path);
         let first_entry_path = System::path_of_first_entry_inside(&starting_path, &current_siblings);
         let parent_index = index_inside(&starting_path);
         let current_index = 0;
         let max_entries_displayed = height as usize - 4; // gap+border+border+gap
+
+        let parent_siblings_shift = System::siblings_shift_for(
+                settings.cursor_vertical_gap, max_entries_displayed,
+                parent_index, parent_siblings.len(), None);
+        let current_siblings_shift = System::siblings_shift_for(
+                settings.cursor_vertical_gap, max_entries_displayed,
+                current_index, current_siblings.len(), None);
 
         System {
             window,
@@ -82,7 +90,7 @@ impl System {
             parent_index,
             current_index,
             current_siblings,
-            parent_siblings: collect_siblings_of(&starting_path),
+            parent_siblings,
             child_siblings: System::collect_children(&first_entry_path),
             current_permissions: System::string_permissions_for_path(&first_entry_path),
             current_path: first_entry_path,
@@ -93,13 +101,10 @@ impl System {
                 while max_entries_displayed <= 2 * gap { // gap too large
                     gap -= 1;
                 }
-                assert!(gap >= 0);
                 gap
             },
-            parent_siblings_shift: System::shift_for(parent_index,
-                         max_entries_displayed, settings.cursor_vertical_gap),
-            current_siblings_shift: System::shift_for(current_index,
-                         max_entries_displayed, settings.cursor_vertical_gap),
+            parent_siblings_shift,
+            current_siblings_shift,
             max_entries_displayed,
             entries_display_begin: 2, // gap+border
 
@@ -172,13 +177,14 @@ impl System {
         self.current_permissions =
             System::string_permissions_for_path(&self.current_path);
     }
-//-----------------------------------------------------------------------------
+
     // The display is guaranteed to be able to contain 2*gap (accomplished in settings)
-    fn siblings_shift_for(&mut self, index: usize, len: usize, old_shift: Option<usize>) -> usize {
-        let gap = self.cursor_vertical_gap as i32;
-        let max = self.max_entries_displayed as i32;
+    fn siblings_shift_for(gap: usize, max: usize, index: usize,
+                              len: usize, old_shift: Option<usize>) -> usize {
+        let gap   = gap   as i32;
+        let max   = max   as i32;
         let index = index as i32;
-        let len = len as i32;
+        let len   = len   as i32;
 
         if len <= max         { return 0; }
         if index < gap        { return 0; }
@@ -193,17 +199,33 @@ impl System {
             if shift > old_shift { return shift as usize; }
 
             old_shift as usize
-        } else { (index - gap) as usize } // no requirements => let top of the screen after the gap
+        } else { // no requirements => let at the top of the screen after the gap
+            let mut shift = index - gap;
+            let left_at_bottom = len - shift - max;
+            if left_at_bottom < 0 { shift += left_at_bottom; }
+            shift as usize
+        }
     }
 
+    fn update_parent_siblings_shift(&mut self) {
+        self.parent_siblings_shift = System::siblings_shift_for(
+            self.cursor_vertical_gap, self.max_entries_displayed,
+            self.parent_index, self.parent_siblings.len(), None);
+    }
+
+    fn update_current_siblings_shift(&mut self) {
+        self.current_siblings_shift = System::siblings_shift_for(
+            self.cursor_vertical_gap, self.max_entries_displayed,
+            self.current_index, self.current_siblings.len(), Some(self.current_siblings_shift));
+    }
+//-----------------------------------------------------------------------------
     pub fn up(&mut self) {
         if self.inside_empty_dir() { return }
         if self.current_index > 0 {
             self.current_index -= 1;
 
             self.update_current_from_index();
-            self.current_siblings_shift = self.siblings_shift_for(
-                self.current_index, self.current_siblings.len(), Some(self.current_siblings_shift));
+            self.update_current_siblings_shift();
         }
     }
 
@@ -213,8 +235,7 @@ impl System {
             self.current_index += 1;
 
             self.update_current_from_index();
-            self.current_siblings_shift = self.siblings_shift_for(
-                self.current_index, self.current_siblings.len(), Some(self.current_siblings_shift));
+            self.update_current_siblings_shift();
         }
     }
 
@@ -243,18 +264,14 @@ impl System {
             self.parent_index = index_inside(&self.parent_path);
 
             self.current_siblings_shift = self.parent_siblings_shift;
-            self.parent_siblings_shift = self.siblings_shift_for(
-                self.parent_index, self.parent_siblings.len(), None
-            );
-            // self.parent_siblings_shift = System::shift_for(self.parent_index,
-            //             self.max_entries_displayed, self.cursor_vertical_gap);
+            self.update_parent_siblings_shift();
         }
     }
 
     pub fn right(&mut self) {
         if self.current_is_dir() {
             let current_path_ref = self.current_path.as_ref().unwrap();
-            self.parent_path = self.current_path.as_ref().unwrap().to_path_buf(); // TODO: understand
+            self.parent_path = self.current_path.as_ref().unwrap().to_path_buf();
             self.current_path = System::path_of_first_entry_inside(
                 current_path_ref,
                 &self.child_siblings);
@@ -375,13 +392,6 @@ impl System {
             self.window.mvprintw(self.height - 1, 0, &self.current_permissions);
         }
 
-        // cs.set_paint(&self.window, Paint{fg: Color::Red, bg: Color::Black,
-        //                                     bold: true, underlined: false});
-        self.window.mvprintw(20, 20, self.parent_siblings_shift.to_string());
-        self.window.mvprintw(21, 20, self.parent_index.to_string());
-        self.window.mvprintw(22, 20, self.parent_siblings.len().to_string());
-        self.window.mvprintw(23, 20, self.max_entries_displayed.to_string());
-
         self.window.refresh();
     }
 
@@ -468,15 +478,6 @@ impl System {
         }
     }
 //-----------------------------------------------------------------------------
-    fn shift_for(index: usize, max: usize, gap: usize) -> usize {
-        let allowed_distance = max - gap - 1;
-        if index <= allowed_distance {
-            0
-        } else {
-            index - allowed_distance
-        }
-    }
-
     fn truncate_string(string: &str, max_length: i32) -> String {
         if string.len() > max_length as usize {
             let delimiter = "...";

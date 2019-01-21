@@ -56,7 +56,14 @@ fn permission_number_to_string_representation(mut n: u32) -> String {
 }
 
 pub fn permissions_of(path: &PathBuf) -> Permissions {
-    let metadata = fs::metadata(path).expect("Cou ld not read metadata");
+    let metadata = fs::metadata(path);
+    if metadata.is_err() { return Permissions {
+        owner: 0,
+        group: 0,
+        world: 0,
+        is_directory: false,
+    }};
+    let metadata = metadata.unwrap();
     let is_directory = metadata.is_dir();
     let field = metadata.permissions().mode();
     let world = field % 8;
