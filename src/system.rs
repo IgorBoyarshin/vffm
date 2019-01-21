@@ -88,7 +88,14 @@ impl System {
             current_path: first_entry_path,
             parent_path: starting_path,
 
-            cursor_vertical_gap: settings.cursor_vertical_gap,
+            cursor_vertical_gap: {
+                let mut gap = settings.cursor_vertical_gap;
+                while max_entries_displayed <= 2 * gap { // gap too large
+                    gap -= 1;
+                }
+                assert!(gap >= 0);
+                gap
+            },
             parent_siblings_shift: System::shift_for(parent_index,
                          max_entries_displayed, settings.cursor_vertical_gap),
             current_siblings_shift: System::shift_for(current_index,
@@ -166,19 +173,40 @@ impl System {
             System::string_permissions_for_path(&self.current_path);
     }
 //-----------------------------------------------------------------------------
+    // The display is guaranteed to be able to contain 2*gap (accomplished in settings)
+    fn siblings_shift_for(&mut self, index: usize, len: usize, old_shift: Option<usize>) -> usize {
+        let gap = self.cursor_vertical_gap as i32;
+        let max = self.max_entries_displayed as i32;
+        let index = index as i32;
+        let len = len as i32;
+
+        if index < gap { return 0; }
+        if index >= len - gap {
+            let shift = len - max;
+            if shift < 0 { return 0; }
+            else         { return shift as usize; }
+        }
+
+        if let Some(old_shift) = old_shift {
+            let old_shift = old_shift as i32;
+
+            let shift = index - gap;
+            if shift < old_shift { return shift as usize; }
+            let shift = index + 1 - max + gap;
+            if shift > old_shift { return shift as usize; }
+
+            old_shift as usize
+        } else { (index - gap) as usize } // no requirements => let top of the screen after the gap
+    }
+
     pub fn up(&mut self) {
         if self.inside_empty_dir() { return }
         if self.current_index > 0 {
             self.current_index -= 1;
-            self.update_current_from_index();
 
-            // Check gap
-            let left_top = self.current_index - self.current_siblings_shift;
-            let gap_exceeded = left_top < self.cursor_vertical_gap;
-            let left_undisplayed = self.current_siblings_shift > 0;
-            if gap_exceeded && left_undisplayed {
-                self.current_siblings_shift -= 1;
-            }
+            self.update_current_from_index();
+            self.current_siblings_shift = self.siblings_shift_for(
+                self.current_index, self.current_siblings.len(), Some(self.current_siblings_shift));
         }
     }
 
@@ -186,17 +214,10 @@ impl System {
         if self.inside_empty_dir() { return }
         if self.current_index < self.current_siblings.len() - 1 {
             self.current_index += 1;
-            self.update_current_from_index();
 
-            // Check gap
-            let displayed_top = self.current_index - self.current_siblings_shift;
-            let left_bottom = self.max_entries_displayed - displayed_top;
-            let gap_exceeded = left_bottom <= self.cursor_vertical_gap;
-            let left_to_display = self.current_siblings.len() - self.current_index;
-            let left_undisplayed = left_to_display > self.cursor_vertical_gap;
-            if gap_exceeded && left_undisplayed {
-                self.current_siblings_shift += 1;
-            }
+            self.update_current_from_index();
+            self.current_siblings_shift = self.siblings_shift_for(
+                self.current_index, self.current_siblings.len(), Some(self.current_siblings_shift));
         }
     }
 
@@ -214,14 +235,19 @@ impl System {
             self.current_index = self.parent_index;
             self.parent_index = index_inside(&self.parent_path);
 
-            // Independent
-            self.child_siblings = System::sort(System::collect_children(&self.current_path), &self.sorting_type);
-            self.current_siblings = System::sort(collect_dir(&self.parent_path), &self.sorting_type);
-            self.parent_siblings = System::sort(collect_siblings_of(&self.parent_path), &self.sorting_type);
-
             self.current_siblings_shift = self.parent_siblings_shift;
             self.parent_siblings_shift = System::shift_for(self.parent_index,
                         self.max_entries_displayed, self.cursor_vertical_gap);
+
+            // Independent
+            {
+                self.child_siblings = System::sort(
+                    System::collect_children(&self.current_path), &self.sorting_type);
+                self.current_siblings = System::sort(
+                    collect_dir(&self.parent_path), &self.sorting_type);
+                self.parent_siblings = System::sort(
+                    collect_siblings_of(&self.parent_path), &self.sorting_type);
+            }
         }
     }
 
@@ -238,13 +264,18 @@ impl System {
             self.parent_index = self.current_index;
             self.current_index = 0;
 
-            // Independent
-            self.child_siblings = System::sort(System::collect_children(&self.current_path), &self.sorting_type);
-            self.current_siblings = System::sort(collect_dir(&self.parent_path), &self.sorting_type);
-            self.parent_siblings = System::sort(collect_siblings_of(&self.parent_path), &self.sorting_type);
-
             self.parent_siblings_shift = self.current_siblings_shift;
             self.current_siblings_shift = 0;
+
+            // Independent
+            {
+                self.child_siblings = System::sort(
+                    System::collect_children(&self.current_path), &self.sorting_type);
+                self.current_siblings = System::sort(
+                    collect_dir(&self.parent_path), &self.sorting_type);
+                self.parent_siblings = System::sort(
+                    collect_siblings_of(&self.parent_path), &self.sorting_type);
+            }
         }
     }
 //-----------------------------------------------------------------------------
@@ -343,6 +374,13 @@ impl System {
                                                 bold: false, underlined: false});
             self.window.mvprintw(self.height - 1, 0, &self.current_permissions);
         }
+
+        cs.set_paint(&self.window, Paint{fg: Color::Red, bg: Color::Black,
+                                            bold: true, underlined: false});
+        self.window.mvprintw(20, 20, self.current_siblings_shift.to_string());
+        self.window.mvprintw(21, 20, self.current_index.to_string());
+        self.window.mvprintw(22, 20, self.current_siblings.len().to_string());
+        self.window.mvprintw(23, 20, self.max_entries_displayed.to_string());
 
         self.window.refresh();
     }
