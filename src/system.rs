@@ -180,12 +180,9 @@ impl System {
         let index = index as i32;
         let len = len as i32;
 
-        if index < gap { return 0; }
-        if index >= len - gap {
-            let shift = len - max;
-            if shift < 0 { return 0; }
-            else         { return shift as usize; }
-        }
+        if len <= max         { return 0; }
+        if index < gap        { return 0; }
+        if index >= len - gap { return (len - max) as usize; }
 
         if let Some(old_shift) = old_shift {
             let old_shift = old_shift as i32;
@@ -232,13 +229,6 @@ impl System {
             self.current_permissions =
                 System::string_permissions_for_path(&self.current_path);
 
-            self.current_index = self.parent_index;
-            self.parent_index = index_inside(&self.parent_path);
-
-            self.current_siblings_shift = self.parent_siblings_shift;
-            self.parent_siblings_shift = System::shift_for(self.parent_index,
-                        self.max_entries_displayed, self.cursor_vertical_gap);
-
             // Independent
             {
                 self.child_siblings = System::sort(
@@ -248,6 +238,16 @@ impl System {
                 self.parent_siblings = System::sort(
                     collect_siblings_of(&self.parent_path), &self.sorting_type);
             }
+
+            self.current_index = self.parent_index;
+            self.parent_index = index_inside(&self.parent_path);
+
+            self.current_siblings_shift = self.parent_siblings_shift;
+            self.parent_siblings_shift = self.siblings_shift_for(
+                self.parent_index, self.parent_siblings.len(), None
+            );
+            // self.parent_siblings_shift = System::shift_for(self.parent_index,
+            //             self.max_entries_displayed, self.cursor_vertical_gap);
         }
     }
 
@@ -261,12 +261,6 @@ impl System {
             self.current_permissions =
                 System::string_permissions_for_path(&self.current_path);
 
-            self.parent_index = self.current_index;
-            self.current_index = 0;
-
-            self.parent_siblings_shift = self.current_siblings_shift;
-            self.current_siblings_shift = 0;
-
             // Independent
             {
                 self.child_siblings = System::sort(
@@ -276,6 +270,12 @@ impl System {
                 self.parent_siblings = System::sort(
                     collect_siblings_of(&self.parent_path), &self.sorting_type);
             }
+
+            self.parent_index = self.current_index;
+            self.current_index = 0;
+
+            self.parent_siblings_shift = self.current_siblings_shift;
+            self.current_siblings_shift = 0;
         }
     }
 //-----------------------------------------------------------------------------
@@ -375,11 +375,11 @@ impl System {
             self.window.mvprintw(self.height - 1, 0, &self.current_permissions);
         }
 
-        cs.set_paint(&self.window, Paint{fg: Color::Red, bg: Color::Black,
-                                            bold: true, underlined: false});
-        self.window.mvprintw(20, 20, self.current_siblings_shift.to_string());
-        self.window.mvprintw(21, 20, self.current_index.to_string());
-        self.window.mvprintw(22, 20, self.current_siblings.len().to_string());
+        // cs.set_paint(&self.window, Paint{fg: Color::Red, bg: Color::Black,
+        //                                     bold: true, underlined: false});
+        self.window.mvprintw(20, 20, self.parent_siblings_shift.to_string());
+        self.window.mvprintw(21, 20, self.parent_index.to_string());
+        self.window.mvprintw(22, 20, self.parent_siblings.len().to_string());
         self.window.mvprintw(23, 20, self.max_entries_displayed.to_string());
 
         self.window.refresh();
