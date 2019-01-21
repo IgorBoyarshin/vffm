@@ -479,48 +479,28 @@ impl System {
         positions
     }
 
-    pub fn human_size(size: u64) -> String {
+    pub fn human_size(mut size: u64) -> String {
         if size < 1024 { return size.to_string() + " B"; }
-        // Kilo
-        let full = size / 1024;
-        if full < 1024 {
-            let mut string = full.to_string();
-            let remainder = size % 1024;
-            if remainder != 0 {
-                string += ".";
-                string += &(remainder * 10 / 1024).to_string();
-            }
 
-            return string + " K";
-        }
-        // Mega
-        let size = size / 1024;
-        let full = size / 1024;
-        if full < 1024 {
-            let mut string = full.to_string();
-            let remainder = size % 1024;
-            if remainder != 0 {
-                string += ".";
-                string += &(remainder * 10 / 1024).to_string();
-            }
-
-            return string + " M";
-        }
-        // Giga
-        let size = size / 1024;
-        let full = size / 1024;
-        if full < 1024 {
-            let mut string = full.to_string();
-            let remainder = size % 1024;
-            if remainder != 0 {
-                string += ".";
-                string += &(remainder * 10 / 1024).to_string();
-            }
-
-            return string + " G";
+        let mut letter_index = 0;
+        let mut full;
+        loop {
+            full = size / 1024;
+            if full < 1024 { break; }
+            letter_index += 1;
+            size /= 1024;
         }
 
-        "<>".to_string()
+        let mut string = full.to_string();
+        let remainder = size % 1024;
+        if remainder != 0 {
+            string += ".";
+            string += &(remainder * 10 / 1024).to_string();
+        }
+        string += " ";
+
+        string += "KMGTP".get(letter_index..letter_index+1).expect("Size too large");
+        string
     }
 //-----------------------------------------------------------------------------
     fn setup() -> Window {
