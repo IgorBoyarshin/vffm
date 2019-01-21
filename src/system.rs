@@ -99,7 +99,7 @@ impl System {
             sorting_type: SortingType::Any,
         }
     }
-
+//-----------------------------------------------------------------------------
     pub fn change_sorting_type(&mut self, new_sorting_type: SortingType) {
         self.sorting_type = new_sorting_type;
     }
@@ -112,7 +112,7 @@ impl System {
         }
         entries
     }
-
+//-----------------------------------------------------------------------------
     fn string_permissions_for_path(path: &Option<PathBuf>) -> String {
         if path.is_some() {
             permissions_of(&path.as_ref().unwrap())
@@ -120,13 +120,13 @@ impl System {
         } else { "".to_string() }
     }
 
-    fn shift_for(index: usize, max: usize, gap: usize) -> usize {
-        let allowed_distance = max - gap - 1;
-        if index <= allowed_distance {
-            0
-        } else {
-            index - allowed_distance
-        }
+    fn current_entry_ref(&self) -> &Entry {
+        &self.current_siblings[self.current_index]
+    }
+
+    fn current_is_dir(&self) -> bool {
+        if self.inside_empty_dir() { return false; }
+        self.current_entry_ref().is_dir()
     }
 
     fn inside_empty_dir(&self) -> bool {
@@ -146,140 +146,7 @@ impl System {
             collect_dir(&path)
         } else { Vec::new() }
     }
-
-    pub fn get(&self) -> Option<Input> {
-        self.window.getch()
-    }
-
-    fn positions_from_ratio(ratio: Vec<u32>, width: Coord) -> Vec<(Coord, Coord)> {
-        let width = width as f32;
-        let sum = ratio.iter().sum::<u32>() as f32;
-        let mut pos: Coord = 0;
-        let mut positions: Vec<(Coord, Coord)> = Vec::new();
-        let last_index = ratio.len() - 1;
-        for (index, r) in ratio.into_iter().enumerate() {
-            let weight = ((r as f32 / sum) * width) as Coord;
-            let end = if index == last_index {
-                width as i32 - 2
-            } else {
-                pos + weight
-            };
-            positions.push((pos, end));
-            pos += weight + 1;
-        }
-        positions
-    }
-
-    pub fn human_size(size: u64) -> String {
-        if size < 1024 { return size.to_string() + " B"; }
-        // Kilo
-        let full = size / 1024;
-        if full < 1024 {
-            let mut string = full.to_string();
-            let remainder = size % 1024;
-            if remainder != 0 {
-                string += ".";
-                string += &(remainder * 10 / 1024).to_string();
-            }
-
-            return string + " K";
-        }
-        // Mega
-        let size = size / 1024;
-        let full = size / 1024;
-        if full < 1024 {
-            let mut string = full.to_string();
-            let remainder = size % 1024;
-            if remainder != 0 {
-                string += ".";
-                string += &(remainder * 10 / 1024).to_string();
-            }
-
-            return string + " M";
-        }
-        // Giga
-        let size = size / 1024;
-        let full = size / 1024;
-        if full < 1024 {
-            let mut string = full.to_string();
-            let remainder = size % 1024;
-            if remainder != 0 {
-                string += ".";
-                string += &(remainder * 10 / 1024).to_string();
-            }
-
-            return string + " G";
-        }
-
-        "<>".to_string()
-    }
-
-    fn truncate_string(string: &str, max_length: i32) -> String {
-        if string.len() > max_length as usize {
-            let delimiter = "...";
-            let leave_at_end = 5;
-            let total_end_len = leave_at_end + delimiter.len();
-            let start = max_length as usize - total_end_len;
-            let mut new = string.clone().to_string();
-            new.replace_range(start..(string.len() - leave_at_end), delimiter);
-            new
-        } else {
-            string.clone().to_string()
-        }
-    }
-
-    fn list_entry(&self, cs: &mut ColorSystem, column_index: usize,
-            y: usize, entry: &Entry, selected: bool) {
-        let paint = match entry.entrytype {
-            EntryType::Regular => self.file_paint,
-            EntryType::Directory => self.dir_paint,
-            EntryType::Symlink => self.symlink_paint,
-            EntryType::Unknown => self.unknown_paint,
-        };
-        let paint = System::maybe_selected_paint_from(paint, selected);
-        cs.set_paint(&self.window, paint);
-
-        let (begin, end) = self.columns_coord[column_index];
-        let column_width = end - begin;
-        let size = System::human_size(entry.size);
-        let size_len = size.len();
-        let name_len = entry.name.len() as i32;
-        let empty_space_length = column_width - name_len - size_len as i32;
-        let y = y as Coord + self.entries_display_begin;
-        if empty_space_length < 1 {
-            // everything doesn't fit => sacrifice Size and truncate the Name
-            let text = System::truncate_string(&entry.name, column_width);
-            let leftover = column_width - text.len() as i32;
-            self.window.mvprintw(y, begin + 1, &text);
-            self.window.mv(y, begin + 1 + text.len() as i32);
-            self.window.hline(' ', leftover);
-        } else { // everything fits OK
-            self.window.mvprintw(y, begin + 1, &entry.name);
-            self.window.mv(y, begin + 1 + name_len);
-            self.window.hline(' ', empty_space_length);
-            self.window.mvprintw(y, begin + 1 + name_len + empty_space_length, size);
-        }
-    }
-
-    fn list_entries(&self, mut cs: &mut ColorSystem, column_index: usize,
-            entries: &Vec<Entry>, selected_index: Option<usize>, shift: usize) {
-        for (index, entry) in entries.into_iter().enumerate()
-                .skip(shift).take(self.max_entries_displayed) {
-            let selected = match selected_index {
-                Some(i) => (i == index),
-                None    => false,
-            };
-            self.list_entry(&mut cs, column_index, index - shift, &entry, selected);
-        }
-    }
-
-    fn maybe_selected_paint_from(paint: Paint, convert: bool) -> Paint {
-        if convert {
-            let Paint {fg, bg, bold: _, underlined} = paint;
-            Paint {fg: bg, bg: fg, bold: true, underlined}
-        } else { paint }
-    }
-
+//-----------------------------------------------------------------------------
     fn update_current_from_index(&mut self) {
         let current_entry = self.current_entry_ref();
         let name = current_entry.name.clone();
@@ -298,7 +165,7 @@ impl System {
         self.current_permissions =
             System::string_permissions_for_path(&self.current_path);
     }
-
+//-----------------------------------------------------------------------------
     pub fn up(&mut self) {
         if self.inside_empty_dir() { return }
         if self.current_index > 0 {
@@ -380,16 +247,52 @@ impl System {
             self.current_siblings_shift = 0;
         }
     }
+//-----------------------------------------------------------------------------
+    fn list_entry(&self, cs: &mut ColorSystem, column_index: usize,
+            y: usize, entry: &Entry, selected: bool) {
+        let paint = match entry.entrytype {
+            EntryType::Regular => self.file_paint,
+            EntryType::Directory => self.dir_paint,
+            EntryType::Symlink => self.symlink_paint,
+            EntryType::Unknown => self.unknown_paint,
+        };
+        let paint = System::maybe_selected_paint_from(paint, selected);
+        cs.set_paint(&self.window, paint);
 
-    fn current_entry_ref(&self) -> &Entry {
-        &self.current_siblings[self.current_index]
+        let (begin, end) = self.columns_coord[column_index];
+        let column_width = end - begin;
+        let size = System::human_size(entry.size);
+        let size_len = size.len();
+        let name_len = entry.name.len() as i32;
+        let empty_space_length = column_width - name_len - size_len as i32;
+        let y = y as Coord + self.entries_display_begin;
+        if empty_space_length < 1 {
+            // everything doesn't fit => sacrifice Size and truncate the Name
+            let text = System::truncate_string(&entry.name, column_width);
+            let leftover = column_width - text.len() as i32;
+            self.window.mvprintw(y, begin + 1, &text);
+            self.window.mv(y, begin + 1 + text.len() as i32);
+            self.window.hline(' ', leftover);
+        } else { // everything fits OK
+            self.window.mvprintw(y, begin + 1, &entry.name);
+            self.window.mv(y, begin + 1 + name_len);
+            self.window.hline(' ', empty_space_length);
+            self.window.mvprintw(y, begin + 1 + name_len + empty_space_length, size);
+        }
     }
 
-    fn current_is_dir(&self) -> bool {
-        if self.inside_empty_dir() { return false; }
-        self.current_entry_ref().is_dir()
+    fn list_entries(&self, mut cs: &mut ColorSystem, column_index: usize,
+            entries: &Vec<Entry>, selected_index: Option<usize>, shift: usize) {
+        for (index, entry) in entries.into_iter().enumerate()
+                .skip(shift).take(self.max_entries_displayed) {
+            let selected = match selected_index {
+                Some(i) => (i == index),
+                None    => false,
+            };
+            self.list_entry(&mut cs, column_index, index - shift, &entry, selected);
+        }
     }
-
+//-----------------------------------------------------------------------------
     pub fn clear(&self, color_system: &mut ColorSystem) {
         color_system.set_paint(&self.window, self.primary_paint);
         for y in 0..self.height {
@@ -399,10 +302,49 @@ impl System {
         self.window.refresh();
     }
 
-    fn write_empty_sign(&self, cs: &mut ColorSystem, column_index: usize) {
-        cs.set_paint(&self.window, Paint{fg: Color::Black, bg: Color::Red, bold: true, underlined: false});
-        let (begin, _) = self.columns_coord[column_index];
-        self.window.mvprintw(self.entries_display_begin, begin + 1, "empty");
+    pub fn draw(&self, mut cs: &mut ColorSystem) {
+        self.draw_borders(&mut cs);
+
+        // Previous
+        let column_index = 0;
+        self.list_entries(&mut cs, column_index, &self.parent_siblings,
+                          Some(self.parent_index), self.parent_siblings_shift);
+
+        // Current
+        let column_index = 1;
+        if self.current_siblings.is_empty() {
+            self.draw_empty_sign(&mut cs, column_index);
+        } else {
+            self.list_entries(&mut cs, column_index, &self.current_siblings,
+                          Some(self.current_index), self.current_siblings_shift);
+        }
+
+        // Next
+        let column_index = 2;
+        if !self.inside_empty_dir() {
+            if self.current_is_dir() && self.child_siblings.is_empty() {
+                self.draw_empty_sign(&mut cs, column_index);
+            } else {
+                self.list_entries(&mut cs, column_index, &self.child_siblings, None, 0);
+            }
+        }
+
+        // Current path
+        if !self.inside_empty_dir() {
+            cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Black,
+                                                bold: false, underlined: false});
+            self.window.mvprintw(0, 0,
+                         self.current_path.as_ref().unwrap().to_str().unwrap());
+        }
+
+        // Current permissions
+        if self.current_path.is_some() {
+            cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Black,
+                                                bold: false, underlined: false});
+            self.window.mvprintw(self.height - 1, 0, &self.current_permissions);
+        }
+
+        self.window.refresh();
     }
 
     pub fn draw_available_matches(&self, cs: &mut ColorSystem,
@@ -444,49 +386,10 @@ impl System {
         }
     }
 
-    pub fn draw(&self, mut cs: &mut ColorSystem) {
-        self.draw_borders(&mut cs);
-
-        // Previous
-        let column_index = 0;
-        self.list_entries(&mut cs, column_index, &self.parent_siblings,
-                          Some(self.parent_index), self.parent_siblings_shift);
-
-        // Current
-        let column_index = 1;
-        if self.current_siblings.is_empty() {
-            self.write_empty_sign(&mut cs, column_index);
-        } else {
-            self.list_entries(&mut cs, column_index, &self.current_siblings,
-                          Some(self.current_index), self.current_siblings_shift);
-        }
-
-        // Next
-        let column_index = 2;
-        if !self.inside_empty_dir() {
-            if self.current_is_dir() && self.child_siblings.is_empty() {
-                self.write_empty_sign(&mut cs, column_index);
-            } else {
-                self.list_entries(&mut cs, column_index, &self.child_siblings, None, 0);
-            }
-        }
-
-        // Current path
-        if !self.inside_empty_dir() {
-            cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Black,
-                                                bold: false, underlined: false});
-            self.window.mvprintw(0, 0,
-                         self.current_path.as_ref().unwrap().to_str().unwrap());
-        }
-
-        // Current permissions
-        if self.current_path.is_some() {
-            cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Black,
-                                                bold: false, underlined: false});
-            self.window.mvprintw(self.height - 1, 0, &self.current_permissions);
-        }
-
-        self.window.refresh();
+    fn draw_empty_sign(&self, cs: &mut ColorSystem, column_index: usize) {
+        cs.set_paint(&self.window, Paint{fg: Color::Black, bg: Color::Red, bold: true, underlined: false});
+        let (begin, _) = self.columns_coord[column_index];
+        self.window.mvprintw(self.entries_display_begin, begin + 1, "empty");
     }
 
     fn draw_column(&self, color_system: &mut ColorSystem, x: Coord) {
@@ -526,8 +429,100 @@ impl System {
             self.draw_column(color_system, *start);
         }
     }
+//-----------------------------------------------------------------------------
+    fn shift_for(index: usize, max: usize, gap: usize) -> usize {
+        let allowed_distance = max - gap - 1;
+        if index <= allowed_distance {
+            0
+        } else {
+            index - allowed_distance
+        }
+    }
 
+    fn truncate_string(string: &str, max_length: i32) -> String {
+        if string.len() > max_length as usize {
+            let delimiter = "...";
+            let leave_at_end = 5;
+            let total_end_len = leave_at_end + delimiter.len();
+            let start = max_length as usize - total_end_len;
+            let mut new = string.clone().to_string();
+            new.replace_range(start..(string.len() - leave_at_end), delimiter);
+            new
+        } else {
+            string.clone().to_string()
+        }
+    }
 
+    fn maybe_selected_paint_from(paint: Paint, convert: bool) -> Paint {
+        if convert {
+            let Paint {fg, bg, bold: _, underlined} = paint;
+            Paint {fg: bg, bg: fg, bold: true, underlined}
+        } else { paint }
+    }
+
+    fn positions_from_ratio(ratio: Vec<u32>, width: Coord) -> Vec<(Coord, Coord)> {
+        let width = width as f32;
+        let sum = ratio.iter().sum::<u32>() as f32;
+        let mut pos: Coord = 0;
+        let mut positions: Vec<(Coord, Coord)> = Vec::new();
+        let last_index = ratio.len() - 1;
+        for (index, r) in ratio.into_iter().enumerate() {
+            let weight = ((r as f32 / sum) * width) as Coord;
+            let end = if index == last_index {
+                width as i32 - 2
+            } else {
+                pos + weight
+            };
+            positions.push((pos, end));
+            pos += weight + 1;
+        }
+        positions
+    }
+
+    pub fn human_size(size: u64) -> String {
+        if size < 1024 { return size.to_string() + " B"; }
+        // Kilo
+        let full = size / 1024;
+        if full < 1024 {
+            let mut string = full.to_string();
+            let remainder = size % 1024;
+            if remainder != 0 {
+                string += ".";
+                string += &(remainder * 10 / 1024).to_string();
+            }
+
+            return string + " K";
+        }
+        // Mega
+        let size = size / 1024;
+        let full = size / 1024;
+        if full < 1024 {
+            let mut string = full.to_string();
+            let remainder = size % 1024;
+            if remainder != 0 {
+                string += ".";
+                string += &(remainder * 10 / 1024).to_string();
+            }
+
+            return string + " M";
+        }
+        // Giga
+        let size = size / 1024;
+        let full = size / 1024;
+        if full < 1024 {
+            let mut string = full.to_string();
+            let remainder = size % 1024;
+            if remainder != 0 {
+                string += ".";
+                string += &(remainder * 10 / 1024).to_string();
+            }
+
+            return string + " G";
+        }
+
+        "<>".to_string()
+    }
+//-----------------------------------------------------------------------------
     fn setup() -> Window {
         let window = initscr();
         window.refresh();
@@ -540,6 +535,10 @@ impl System {
 
     fn get_height_width(window: &Window) -> (i32, i32) {
         window.get_max_yx()
+    }
+
+    pub fn get(&self) -> Option<Input> {
+        self.window.getch()
     }
 }
 
