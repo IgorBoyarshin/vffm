@@ -8,11 +8,48 @@ use std::path::PathBuf;
 
 use std::process::Command;
 
-extern crate regex;
-use regex::Regex;
+use std::collections::HashMap;
 
 type Coord = i32;
+//-----------------------------------------------------------------------------
+#[derive(Clone)]
+struct SpawnRule {
+    rule: String,
+}
 
+impl SpawnRule {
+    fn generate(&self, name: &str) -> String {
+        let placeholder = "@";
+        self.rule.replace(placeholder, name)
+    }
+}
+
+enum SpawnFile {
+    Extension(String),
+    ExactName(String),
+}
+
+struct SpawnPattern {
+    file: SpawnFile,
+    rule: SpawnRule,
+}
+
+impl SpawnPattern {
+    fn new_ext(ext: &str, rule: &str) -> SpawnPattern {
+        SpawnPattern {
+            file: SpawnFile::Extension(ext.to_string()),
+            rule: SpawnRule{ rule: rule.to_string() },
+        }
+    }
+
+    fn new_exact(name: &str, rule: &str) -> SpawnPattern {
+        SpawnPattern {
+            file: SpawnFile::ExactName(name.to_string()),
+            rule: SpawnRule{ rule: rule.to_string() },
+        }
+    }
+}
+//-----------------------------------------------------------------------------
 pub struct Settings {
     pub columns_ratio: Vec<u32>,
     pub dir_paint: Paint,
@@ -57,7 +94,7 @@ pub struct System {
 
     sorting_type: SortingType,
 
-    regex_ext: Regex, // const
+    spawn_patterns: Vec<SpawnPattern>, // const
 }
 
 impl System {
@@ -119,27 +156,59 @@ impl System {
 
             sorting_type,
 
-            regex_ext: System::prep_regex_ext(),
+            spawn_patterns: System::generate_spawn_patterns(),
         }
     }
 //-----------------------------------------------------------------------------
-    fn prep_regex_ext() -> Regex {
-        let extensions_text = vec!["txt", "cpp", "h", "rs", "lock",
-            "toml", "zsh", "java", "py", "sh", "mb", "log", "yml"];
-        assert!(!extensions_text.is_empty());
-        let mut all_extensions = String::new();
-        for ext in extensions_text {
-            all_extensions += ext;
-            all_extensions += "|";
-        }
-        all_extensions.pop();
+    fn generate_spawn_patterns() -> Vec<SpawnPattern> {
+        let add_to_apps = |apps: &mut HashMap<String, Vec<String>>,
+                app: &str, extensions: Vec<&'static str>| {
+            let mut vec = Vec::new();
+            for ext in extensions {
+                vec.push(ext.to_string());
+            }
+            apps.insert(app.to_string(), vec);
+        };
 
-        let expr = ".*\\.(".to_string() + &all_extensions + ")";
-        Regex::new(&expr).unwrap()
+        let mut apps_extensions: HashMap<String, Vec<String>> = HashMap::new();
+        let mut apps_exact_names: HashMap<String, Vec<String>> = HashMap::new();
+
+        add_to_apps(&mut apps_extensions, "vim @", vec!["txt", "cpp", "h", "rs", "lock", "toml", "zsh",
+            "java", "py", "sh", "mb", "log", "yml"]);
+        add_to_apps(&mut apps_exact_names, "vim @", vec!["Makefile", ".gitignore"]);
+        add_to_apps(&mut apps_extensions, "vlc @", vec!["mkv", "avi", "mp4", "mp3"]);
+
+        let mut patterns: Vec<SpawnPattern> = Vec::new();
+        for (app, extensions) in apps_extensions.into_iter() {
+            for ext in extensions {
+                patterns.push(SpawnPattern::new_ext(&ext, &app));
+            }
+        }
+        for (app, names) in apps_exact_names.into_iter() {
+            for name in names {
+                patterns.push(SpawnPattern::new_exact(&name, &app));
+            }
+        }
+
+        patterns
+    }
+
+    fn spawn_rule_for(&self, file_name: &str, full_path: &str) -> Option<String> {
+        for SpawnPattern { file, rule } in self.spawn_patterns.iter() {
+            match file {
+                SpawnFile::Extension(ext) => if file_name.ends_with(ext.as_str()) {
+                    return Some(rule.clone().generate(full_path));
+                },
+                SpawnFile::ExactName(name) => if file_name == name {
+                    return Some(rule.clone().generate(full_path));
+                }
+            }
+        }
+        None
     }
 //-----------------------------------------------------------------------------
     fn spawn(app: &str, args: Vec<&str>) {
-        Command::new(app).arg(args[0]).status().expect("failed to execute process");
+        Command::new(app).args(args).status().expect("failed to execute process");
     }
 //-----------------------------------------------------------------------------
     pub fn change_sorting_type(&mut self, new_sorting_type: SortingType) {
@@ -308,9 +377,9 @@ impl System {
 
     pub fn right(&mut self) {
         if let Some(current_entry) = self.current_entry_ref() {
+            let current_path_ref = self.current_path.as_ref().unwrap();
             if current_entry.is_dir() {
                 // Navigate inside
-                let current_path_ref = self.current_path.as_ref().unwrap();
                 self.parent_path = current_path_ref.to_path_buf();
                 self.current_path = System::path_of_first_entry_inside(
                     current_path_ref, &self.child_siblings);
@@ -324,17 +393,12 @@ impl System {
             } else if current_entry.is_regular() {
                 // Try to open with default app
                 let file_name = current_entry.name.as_str();
-                let names_text = vec!["Makefile", ".gitignore"];
-                let mut matched = false;
-                for name in names_text {
-                    if name == file_name { matched = true; }
-                }
-                if !matched {
-                    matched = self.regex_ext.is_match(file_name);
-                }
-
-                if matched {
-                    System::spawn("vim", vec![self.current_path.as_ref().unwrap().to_str().unwrap()]);
+                let full_path = current_path_ref.to_str().unwrap();
+                if let Some(rule) = self.spawn_rule_for(file_name, full_path) {
+                    let mut parts = rule.split_whitespace();
+                    let app = parts.next().unwrap(); // first part
+                    let args = parts.collect(); // all subsequent parts
+                    System::spawn(app, args);
                 }
             }
         }
