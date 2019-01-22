@@ -6,6 +6,11 @@ use crate::input::*;
 
 use std::path::PathBuf;
 
+use std::process::Command;
+
+extern crate regex;
+use regex::Regex;
+
 type Coord = i32;
 
 pub struct Settings {
@@ -51,6 +56,8 @@ pub struct System {
     current_siblings_shift: usize,
 
     sorting_type: SortingType,
+
+    regex_ext: Regex, // const
 }
 
 impl System {
@@ -111,7 +118,28 @@ impl System {
             entries_display_begin: 2, // gap+border
 
             sorting_type,
+
+            regex_ext: System::prep_regex_ext(),
         }
+    }
+//-----------------------------------------------------------------------------
+    fn prep_regex_ext() -> Regex {
+        let extensions_text = vec!["txt", "cpp", "h", "rs", "lock",
+            "toml", "zsh", "java", "py", "sh", "mb", "log", "yml"];
+        assert!(!extensions_text.is_empty());
+        let mut all_extensions = String::new();
+        for ext in extensions_text {
+            all_extensions += ext;
+            all_extensions += "|";
+        }
+        all_extensions.pop();
+
+        let expr = ".*\\.(".to_string() + &all_extensions + ")";
+        Regex::new(&expr).unwrap()
+    }
+//-----------------------------------------------------------------------------
+    fn spawn(app: &str, args: Vec<&str>) {
+        Command::new(app).arg(args[0]).status().expect("failed to execute process");
     }
 //-----------------------------------------------------------------------------
     pub fn change_sorting_type(&mut self, new_sorting_type: SortingType) {
@@ -135,6 +163,11 @@ impl System {
 
     fn get_current_permissions(&mut self) -> String {
         System::string_permissions_for_path(&self.current_path)
+    }
+
+    fn current_entry_ref(&self) -> Option<&Entry> {
+        if self.current_path.is_some() { Some(self.unsafe_current_entry_ref()) }
+        else { None }
     }
 
     fn unsafe_current_entry_ref(&self) -> &Entry {
@@ -274,18 +307,36 @@ impl System {
     }
 
     pub fn right(&mut self) {
-        if self.current_is_dir() {
-            let current_path_ref = self.current_path.as_ref().unwrap();
-            self.parent_path = current_path_ref.to_path_buf();
-            self.current_path = System::path_of_first_entry_inside(
-                current_path_ref, &self.child_siblings);
+        if let Some(current_entry) = self.current_entry_ref() {
+            if current_entry.is_dir() {
+                // Navigate inside
+                let current_path_ref = self.current_path.as_ref().unwrap();
+                self.parent_path = current_path_ref.to_path_buf();
+                self.current_path = System::path_of_first_entry_inside(
+                    current_path_ref, &self.child_siblings);
 
-            self.common_left_right();
+                self.common_left_right();
 
-            self.parent_index = self.current_index;
-            self.current_index = 0;
-            self.parent_siblings_shift = self.current_siblings_shift;
-            self.current_siblings_shift = 0;
+                self.parent_index = self.current_index;
+                self.current_index = 0;
+                self.parent_siblings_shift = self.current_siblings_shift;
+                self.current_siblings_shift = 0;
+            } else if current_entry.is_regular() {
+                // Try to open with default app
+                let file_name = current_entry.name.as_str();
+                let names_text = vec!["Makefile", ".gitignore"];
+                let mut matched = false;
+                for name in names_text {
+                    if name == file_name { matched = true; }
+                }
+                if !matched {
+                    matched = self.regex_ext.is_match(file_name);
+                }
+
+                if matched {
+                    System::spawn("vim", vec![self.current_path.as_ref().unwrap().to_str().unwrap()]);
+                }
+            }
         }
     }
 //-----------------------------------------------------------------------------
