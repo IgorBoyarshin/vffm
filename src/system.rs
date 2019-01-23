@@ -6,7 +6,7 @@ use crate::input::*;
 
 use std::path::PathBuf;
 
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use std::collections::HashMap;
 
@@ -17,12 +17,13 @@ type Coord = i32;
 #[derive(Clone)]
 struct SpawnRule {
     rule: String,
+    is_external: bool,
 }
 
 impl SpawnRule {
-    fn generate(&self, name: &str) -> String {
+    fn generate(&self, name: &str) -> (String, bool) {
         let placeholder = "@";
-        self.rule.replace(placeholder, name)
+        (self.rule.replace(placeholder, name), self.is_external)
     }
 }
 
@@ -37,17 +38,17 @@ struct SpawnPattern {
 }
 
 impl SpawnPattern {
-    fn new_ext(ext: &str, rule: &str) -> SpawnPattern {
+    fn new_ext(ext: &str, rule: &str, is_external: bool) -> SpawnPattern {
         SpawnPattern {
             file: SpawnFile::Extension(ext.to_string()),
-            rule: SpawnRule{ rule: rule.to_string() },
+            rule: SpawnRule{ rule: rule.to_string(), is_external },
         }
     }
 
-    fn new_exact(name: &str, rule: &str) -> SpawnPattern {
+    fn new_exact(name: &str, rule: &str, is_external: bool) -> SpawnPattern {
         SpawnPattern {
             file: SpawnFile::ExactName(name.to_string()),
-            rule: SpawnRule{ rule: rule.to_string() },
+            rule: SpawnRule{ rule: rule.to_string(), is_external },
         }
     }
 }
@@ -163,39 +164,41 @@ impl System {
     }
 //-----------------------------------------------------------------------------
     fn generate_spawn_patterns() -> Vec<SpawnPattern> {
-        let add_to_apps = |apps: &mut HashMap<String, Vec<String>>,
-                app: &str, extensions: Vec<&'static str>| {
+        let add_to_apps = |apps: &mut HashMap<String, (Vec<String>, bool)>,
+                app: &str, spawn_files: Vec<&'static str>, is_external: bool| {
             let mut vec = Vec::new();
-            for ext in extensions {
-                vec.push(ext.to_string());
+            for spawn_file in spawn_files {
+                vec.push(spawn_file.to_string());
             }
-            apps.insert(app.to_string(), vec);
+            apps.insert(app.to_string(), (vec, is_external));
         };
 
-        let mut apps_extensions: HashMap<String, Vec<String>> = HashMap::new();
-        let mut apps_exact_names: HashMap<String, Vec<String>> = HashMap::new();
+        let mut apps_extensions  = HashMap::new();
+        let mut apps_exact_names = HashMap::new();
+        let external = true; // for convenience and readability
+        let not_external = !external;
 
         add_to_apps(&mut apps_extensions, "vim @", vec!["txt", "cpp", "h", "rs", "lock", "toml", "zsh",
-            "java", "py", "sh", "mb", "log", "yml"]);
-        add_to_apps(&mut apps_exact_names, "vim @", vec!["Makefile", ".gitignore"]);
-        add_to_apps(&mut apps_extensions, "vlc @", vec!["mkv", "avi", "mp4", "mp3"]);
+            "java", "py", "sh", "mb", "log", "yml"], not_external);
+        add_to_apps(&mut apps_exact_names, "vim @", vec!["Makefile", ".gitignore"], not_external);
+        add_to_apps(&mut apps_extensions, "vlc @", vec!["mkv", "avi", "mp4", "mp3"], external);
 
         let mut patterns: Vec<SpawnPattern> = Vec::new();
-        for (app, extensions) in apps_extensions.into_iter() {
+        for (app, (extensions, is_external)) in apps_extensions.into_iter() {
             for ext in extensions {
-                patterns.push(SpawnPattern::new_ext(&ext, &app));
+                patterns.push(SpawnPattern::new_ext(&ext, &app, is_external));
             }
         }
-        for (app, names) in apps_exact_names.into_iter() {
+        for (app, (names, is_external)) in apps_exact_names.into_iter() {
             for name in names {
-                patterns.push(SpawnPattern::new_exact(&name, &app));
+                patterns.push(SpawnPattern::new_exact(&name, &app, is_external));
             }
         }
 
         patterns
     }
 
-    fn spawn_rule_for(&self, file_name: &str, full_path: &str) -> Option<String> {
+    fn spawn_rule_for(&self, file_name: &str, full_path: &str) -> Option<(String, bool)> {
         for SpawnPattern { file, rule } in self.spawn_patterns.iter() {
             match file {
                 SpawnFile::Extension(ext) => if file_name.to_ascii_lowercase()
@@ -210,8 +213,16 @@ impl System {
         None
     }
 //-----------------------------------------------------------------------------
-    fn spawn(app: &str, args: Vec<&str>) {
-        Command::new(app).args(args).status().expect("failed to execute process");
+    fn spawn(app: &str, args: Vec<&str>, external: bool) {
+        if external {
+            Command::new(app).args(args)
+                .stderr(Stdio::null())
+                .stdout(Stdio::null())
+                .spawn().expect("failed to execute process");
+        } else {
+            Command::new(app).args(args)
+                .status().expect("failed to execute process");
+        }
     }
 //-----------------------------------------------------------------------------
     pub fn change_sorting_type(&mut self, new_sorting_type: SortingType) {
@@ -396,11 +407,11 @@ impl System {
                 // Try to open with default app
                 let file_name = current_entry.name.as_str();
                 let full_path = current_path_ref.to_str().unwrap();
-                if let Some(rule) = self.spawn_rule_for(file_name, full_path) {
+                if let Some((rule, is_external)) = self.spawn_rule_for(file_name, full_path) {
                     let mut parts = rule.split_whitespace();
                     let app = parts.next().unwrap(); // first part
                     let args = parts.collect(); // all subsequent parts
-                    System::spawn(app, args);
+                    System::spawn(app, args, is_external);
                 }
             }
         }
