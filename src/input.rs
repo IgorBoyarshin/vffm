@@ -9,8 +9,8 @@ pub type Combination = String;
 pub enum Command {
     Terminate,
     GoTo(String),
-    Up,
-    Down,
+    Up(u32),
+    Down(u32),
     Left,
     Right,
     Sort(SortingType),
@@ -28,9 +28,11 @@ pub fn generate_possible_inputs() -> Vec<(Combination, Command)> {
     let mut inputs = Vec::new();
     inputs.push(("q".to_string(), Command::Terminate));
     inputs.push(("h".to_string(), Command::Left));
-    inputs.push(("j".to_string(), Command::Down));
-    inputs.push(("k".to_string(), Command::Up));
+    inputs.push(("j".to_string(), Command::Down(1)));
+    inputs.push(("k".to_string(), Command::Up(1)));
     inputs.push(("l".to_string(), Command::Right));
+    inputs.push(("K".to_string(), Command::Up(5)));
+    inputs.push(("J".to_string(), Command::Down(5)));
     inputs.push(("sl".to_string(), Command::Sort(SortingType::Lexicographically)));
     inputs.push(("st".to_string(), Command::Sort(SortingType::TimeModified)));
     inputs.push(("sa".to_string(), Command::Sort(SortingType::Any)));
@@ -41,8 +43,8 @@ pub fn description_of(command: &Command) -> String {
     match command {
         Command::Terminate => "Close the program".to_string(),
         Command::GoTo(path) => "Go to ".to_string() + path.as_str(),
-        Command::Up => "Navigate up one entry in the list".to_string(),
-        Command::Down => "Navigate down one entry in the list".to_string(),
+        Command::Up(n) => format!("Navigate up one entry in the list {} times", n),
+        Command::Down(n) => format!("Navigate down one entry in the list {} times", n),
         Command::Left => "Navigate to the parent directory".to_string(),
         Command::Right => "Navigate into the child directory or file".to_string(),
         Command::Sort(sorting_type) => format!("Sort entries {:?}", sorting_type),

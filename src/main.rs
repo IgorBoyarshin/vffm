@@ -80,8 +80,8 @@ fn main() {
                     let (_, command) = found_matches.pop().unwrap();
                     match command {
                         Command::Terminate => terminated = true,
-                        Command::Up => system.up(),
-                        Command::Down => system.down(),
+                        Command::Up(n) => for _ in 0..*n {system.up()},
+                        Command::Down(n) => for _ in 0..*n {system.down()},
                         Command::Left => system.left(),
                         Command::Right => system.right(),
                         Command::Sort(sorting_type) => system.change_sorting_type(*sorting_type),
