@@ -10,6 +10,8 @@ use std::process::Command;
 
 use std::collections::HashMap;
 
+use std::ops::RangeBounds;
+
 type Coord = i32;
 //-----------------------------------------------------------------------------
 #[derive(Clone)]
@@ -196,7 +198,8 @@ impl System {
     fn spawn_rule_for(&self, file_name: &str, full_path: &str) -> Option<String> {
         for SpawnPattern { file, rule } in self.spawn_patterns.iter() {
             match file {
-                SpawnFile::Extension(ext) => if file_name.ends_with(ext.as_str()) {
+                SpawnFile::Extension(ext) => if file_name.to_ascii_lowercase()
+                                                    .ends_with(ext.as_str()) {
                     return Some(rule.clone().generate(full_path));
                 },
                 SpawnFile::ExactName(name) => if file_name == name {
@@ -263,8 +266,7 @@ impl System {
     fn update_last_part_of_current_path_by_index(&mut self) {
         let name = self.unsafe_current_entry_ref().name.clone();
         self.current_path.as_mut().map(|path| {
-            (*path).pop();
-            (*path).push(name);
+            (*path).set_file_name(name); // try_pop and then push(name)
         });
     }
 
@@ -378,7 +380,7 @@ impl System {
     pub fn right(&mut self) {
         if let Some(current_entry) = self.current_entry_ref() {
             let current_path_ref = self.current_path.as_ref().unwrap();
-            if current_entry.is_dir() {
+            if current_entry.is_dir() || current_entry.is_symlink() {
                 // Navigate inside
                 self.parent_path = current_path_ref.to_path_buf();
                 self.current_path = System::path_of_first_entry_inside(
@@ -419,15 +421,16 @@ impl System {
         let column_width = end - begin;
         let size = System::human_size(entry.size);
         let size_len = size.len();
-        let name_len = entry.name.len() as i32;
+        let name_len = System::chars_amount(&entry.name) as i32;
         let empty_space_length = column_width - name_len - size_len as i32;
         let y = y as Coord + self.entries_display_begin;
         if empty_space_length < 1 {
             // everything doesn't fit => sacrifice Size and truncate the Name
-            let text = System::truncate_string(&entry.name, column_width);
-            let leftover = column_width - text.len() as i32;
-            self.window.mvprintw(y, begin + 1, &text);
-            self.window.mv(y, begin + 1 + text.len() as i32);
+            let name = System::truncate_string(&entry.name, column_width);
+            let name_len = System::chars_amount(&name) as i32;
+            let leftover = column_width - name_len;
+            self.window.mvprintw(y, begin + 1, &name);
+            self.window.mv(y, begin + 1 + name_len);
             self.window.hline(' ', leftover);
         } else { // everything fits OK
             self.window.mvprintw(y, begin + 1, &entry.name);
@@ -498,6 +501,14 @@ impl System {
             cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Black,
                                                 bold: false, underlined: false});
             self.window.mvprintw(self.height - 1, 0, &self.current_permissions);
+        }
+
+        // Current size
+        if self.current_path.is_some() {
+            cs.set_paint(&self.window, Paint{fg: Color::Blue, bg: Color::Black,
+                                                bold: false, underlined: false});
+            self.window.mvprintw(self.height - 1, 12,
+                         System::human_size(self.unsafe_current_entry_ref().size));
         }
 
         self.window.refresh();
@@ -587,17 +598,43 @@ impl System {
     }
 //-----------------------------------------------------------------------------
     fn truncate_string(string: &str, max_length: i32) -> String {
-        if string.len() > max_length as usize {
+        let chars_amount = System::chars_amount(&string);
+        if chars_amount > max_length as usize {
             let delimiter = "...";
             let leave_at_end = 5;
             let total_end_len = leave_at_end + delimiter.len();
             let start = max_length as usize - total_end_len;
-            let mut new = string.clone().to_string();
-            new.replace_range(start..(string.len() - leave_at_end), delimiter);
-            new
+            let end = chars_amount - leave_at_end;
+            System::replace_range_with(string, start..end, delimiter)
         } else {
             string.clone().to_string()
         }
+    }
+
+    // Does not validate the range
+    // May implement in the future: https://crates.io/crates/unicode-segmentation
+    fn replace_range_with<R>(string: &str, chars_range: R, replacement: &str) -> String
+            where R: RangeBounds<usize> {
+        use std::ops::Bound::*;
+        let start = match chars_range.start_bound() {
+            Unbounded   => 0,
+            Included(n) => *n,
+            Excluded(n) => *n + 1,
+        };
+        let chars_count = string.chars().count(); // TODO: improve
+        let end = match chars_range.end_bound() {
+            Unbounded   => chars_count,
+            Included(n) => *n + 1,
+            Excluded(n) => *n,
+        };
+
+        let mut chars = string.chars();
+        let mut result = String::new();
+        for _ in 0..start { result.push(chars.next().unwrap()); } // push first part
+        result.push_str(replacement); // push the replacement
+        let mut chars = chars.skip(end - start); // skip this part in the original
+        while let Some(c) = chars.next() { result.push(c); } // push the rest
+        result
     }
 
     fn maybe_selected_paint_from(paint: Paint, convert: bool) -> Paint {
@@ -648,6 +685,10 @@ impl System {
 
         string += "KMGTP".get(letter_index..letter_index+1).expect("Size too large");
         string
+    }
+
+    fn chars_amount(string: &str) -> usize {
+        string.chars().count()
     }
 //-----------------------------------------------------------------------------
     fn setup() -> Window {

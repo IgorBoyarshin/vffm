@@ -1,4 +1,3 @@
-// use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 use std::fs::{self, DirEntry};
@@ -9,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::fs::OpenOptions;
 use std::fs::File;
 use std::os::unix::fs::PermissionsExt;
-use std::io::Write;
+use std::io::{Write, Read};
 
 pub fn log(s: &str) {
     // let name = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string();
@@ -24,11 +23,14 @@ pub struct Permissions {
     group: u32,
     world: u32,
     is_directory: bool,
+    is_symlink: bool,
 }
 
 impl Permissions {
     pub fn string_representation(&self) -> String {
-        let dir = (if self.is_directory {"d"} else {"-"}).to_string();
+        let dir = (if      self.is_directory {"d"}
+                   else if self.is_symlink   {"l"}
+                   else                      {"-"}).to_string();
         let owner = permission_number_to_string_representation(self.owner);
         let group = permission_number_to_string_representation(self.group);
         let world = permission_number_to_string_representation(self.world);
@@ -56,15 +58,18 @@ fn permission_number_to_string_representation(mut n: u32) -> String {
 }
 
 pub fn permissions_of(path: &PathBuf) -> Permissions {
-    let metadata = fs::metadata(path);
+    let metadata = fs::symlink_metadata(path);
     if metadata.is_err() { return Permissions {
         owner: 0,
         group: 0,
         world: 0,
         is_directory: false,
+        is_symlink: false,
     }};
     let metadata = metadata.unwrap();
+    let is_file = metadata.is_file();
     let is_directory = metadata.is_dir();
+    let is_symlink = !(is_file || is_directory);
     let field = metadata.permissions().mode();
     let world = field % 8;
     let group = (field / 8) % 8;
@@ -74,6 +79,7 @@ pub fn permissions_of(path: &PathBuf) -> Permissions {
         group,
         world,
         is_directory,
+        is_symlink,
     }
 }
 //-----------------------------------------------------------------------------
@@ -121,10 +127,21 @@ impl Entry {
     }
 }
 
+// pub fn read_contents(path: &PathBuf) -> String {
+//     let mut file = File::open(path).expect("Could not read file");
+//     let mut contents = String::new();
+//     file.read_to_string(&mut contents).expect("Could not read contents");
+//     contents
+// }
 
+// Follows the symlinks
 pub fn collect_maybe_dir(path: &PathBuf) -> Vec<Entry> {
     let mut vec = Vec::new();
-    if !path.is_dir() { return vec; }
+    if path.is_file() { return vec; }
+    if !path.is_dir() { // so it is a symlink
+        let new_path = path.read_link().expect("Somewhy not a symlink");
+        return collect_maybe_dir(&new_path);
+    } // otherwise it is a directory
     let entries = fs::read_dir(path);
     if !entries.is_ok() { return Vec::new(); }
     let entries = entries.expect(&format!("Could not read dir{:?}", path));
@@ -160,18 +177,10 @@ fn into_entry(dir_entry: DirEntry) -> Entry {
     //     .duration_since(UNIX_EPOCH).unwrap().as_secs();
     let entrytype = {
         let ft = dir_entry.file_type().expect("Could not retrieve filetype");
-        let entrytype: EntryType;
-        if ft.is_file() {
-            entrytype = EntryType::Regular;
-        } else if ft.is_dir() {
-            entrytype = EntryType::Directory;
-        } else if ft.is_symlink() {
-            entrytype = EntryType::Symlink;
-        } else {
-            entrytype = EntryType::Unknown;
-            // panic!("Unknown filetype!");
-        }
-        entrytype
+        if ft.is_file()         { EntryType::Regular }
+        else if ft.is_dir()     { EntryType::Directory }
+        else if ft.is_symlink() { EntryType::Symlink }
+        else                    { EntryType::Unknown }
     };
 
     Entry {
@@ -182,14 +191,14 @@ fn into_entry(dir_entry: DirEntry) -> Entry {
     }
 }
 
-pub fn first_entry_inside(pathbuf: &PathBuf) -> Option<Entry> {
-    let result = fs::read_dir(pathbuf)
-        .expect(&format!("Could not read dir{}", pathbuf.to_str().expect("")))
-        .nth(0);
-    if let Some(entry) = result {
-        Some(into_entry(entry.unwrap()))
-    } else { None }
-}
+// pub fn first_entry_inside(pathbuf: &PathBuf) -> Option<Entry> {
+//     let result = fs::read_dir(pathbuf)
+//         .expect(&format!("Could not read dir{}", pathbuf.to_str().expect("")))
+//         .nth(0);
+//     if let Some(entry) = result {
+//         Some(into_entry(entry.unwrap()))
+//     } else { None }
+// }
 
 pub fn index_of_name_inside(pathbuf: &PathBuf, name: &str) -> Option<usize> {
     let result = fs::read_dir(pathbuf)
@@ -211,31 +220,31 @@ pub fn index_inside(path: &PathBuf) -> usize {
     index_of_name_inside(&parent, name).unwrap()
 }
 
-pub fn get_parent_index(path: &PathBuf) -> usize {
-    if is_root(path) {
-        panic!("get_parent_index: given path is root");
-    }
+// pub fn get_parent_index(path: &PathBuf) -> usize {
+//     if is_root(path) {
+//         panic!("get_parent_index: given path is root");
+//     }
+//
+//     let parent = path.parent().unwrap();
+//     let parent_name = parent.file_name();
+//     if let None = parent_name {
+//         return 0; // the index of '/' is always 0 (it is the only one there)
+//     }
+//     let parent_name = parent_name.unwrap().to_str().unwrap();
+//     0
+// }
 
-    let parent = path.parent().unwrap();
-    let parent_name = parent.file_name();
-    if let None = parent_name {
-        return 0; // the index of '/' is always 0 (it is the only one there)
-    }
-    let parent_name = parent_name.unwrap().to_str().unwrap();
-    0
-}
-
-pub fn files_count_in_dir(pathbuf: &PathBuf) -> usize {
-    fs::read_dir(pathbuf)
-        .expect(&format!("Could not read dir{}", pathbuf.to_str().expect("")))
-        .count()
-}
-
-pub fn absolute_path() -> String {
-    std::env::current_exe().expect("Cannot get absolute path")
-        .to_str().unwrap().to_string()
-}
-
+// pub fn files_count_in_dir(pathbuf: &PathBuf) -> usize {
+//     fs::read_dir(pathbuf)
+//         .expect(&format!("Could not read dir{}", pathbuf.to_str().expect("")))
+//         .count()
+// }
+//
+// pub fn absolute_path() -> String {
+//     std::env::current_exe().expect("Cannot get absolute path")
+//         .to_str().unwrap().to_string()
+// }
+//
 pub fn absolute_pathbuf() -> PathBuf {
     std::env::current_exe().expect("Cannot get absolute PathBuf")
 }
