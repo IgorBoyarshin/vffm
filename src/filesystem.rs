@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::fs::{self, DirEntry};
+use std::io::BufReader;
+use std::io::BufRead;
 
 
 //-----------------------------------------------------------------------------
@@ -125,6 +127,19 @@ impl Entry {
     pub fn is_dir(&self) -> bool {
         self.entrytype == EntryType::Directory
     }
+}
+
+pub fn read_lines(path: &PathBuf, amount: usize, max_bytes: u64) -> Vec<String> {
+    let file = File::open(path).expect("Could not read file");
+    let mut reader = BufReader::new(file).take(max_bytes);
+    let mut lines = Vec::new();
+    for _ in 0..amount {
+        let mut line = String::new();
+        let result = reader.read_line(&mut line);
+        if result.is_err() { return lines; }
+        lines.push(line);
+    }
+    lines
 }
 
 // pub fn read_contents(path: &PathBuf) -> String {

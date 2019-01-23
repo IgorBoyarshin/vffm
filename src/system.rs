@@ -53,12 +53,57 @@ impl SpawnPattern {
     }
 }
 //-----------------------------------------------------------------------------
+struct RightColumn {
+    siblings: Option<Vec<Entry>>,
+    preview: Option<Vec<String>>,
+}
+
+impl RightColumn {
+    fn with_siblings(siblings: Vec<Entry>) -> RightColumn {
+        RightColumn {
+            siblings: Some(siblings),
+            preview: None,
+        }
+    }
+
+    fn with_preview(preview: Vec<String>) -> RightColumn {
+        RightColumn {
+            siblings: None,
+            preview: Some(preview),
+        }
+    }
+
+    fn empty() -> RightColumn {
+        RightColumn {
+            siblings: None,
+            preview: None,
+        }
+    }
+
+    fn siblings_ref(&self) -> Option<&Vec<Entry>> {
+        self.siblings.as_ref()
+    }
+
+    fn preview_ref(&self) -> Option<&Vec<String>> {
+        self.preview.as_ref()
+    }
+
+    fn holds_siblings(&self) -> bool {
+        self.siblings.is_some()
+    }
+
+    fn holds_preview(&self) -> bool {
+        self.preview.is_some()
+    }
+}
+//-----------------------------------------------------------------------------
 pub struct Settings {
     pub columns_ratio: Vec<u32>,
     pub dir_paint: Paint,
     pub symlink_paint: Paint,
     pub file_paint: Paint,
     pub unknown_paint: Paint,
+    pub preview_paint: Paint,
 
     pub cursor_vertical_gap: usize,
 }
@@ -76,10 +121,11 @@ pub struct System {
     symlink_paint: Paint,
     file_paint: Paint,
     unknown_paint: Paint,
+    preview_paint: Paint,
 
     current_siblings: Vec<Entry>,
     parent_siblings: Vec<Entry>,
-    child_siblings: Vec<Entry>,
+    right_column: RightColumn,
 
     current_path: Option<PathBuf>,
     parent_path: PathBuf,
@@ -106,13 +152,16 @@ impl System {
         let (height, width) = System::get_height_width(&window);
         let primary_paint =
             Paint{fg: Color::White, bg: Color::Black, bold: false, underlined: false};
+        let sorting_type = SortingType::Any;
 
         let current_siblings = collect_maybe_dir(&starting_path);
         let parent_siblings = collect_siblings_of(&starting_path);
         let first_entry_path = System::path_of_first_entry_inside(&starting_path, &current_siblings);
+        let max_entries_displayed = height as usize - 4; // gap+border+border+gap
+        let right_column = System::collect_right_column(&first_entry_path,
+                                            &sorting_type, max_entries_displayed);
         let parent_index = index_inside(&starting_path);
         let current_index = 0;
-        let max_entries_displayed = height as usize - 4; // gap+border+border+gap
 
         let parent_siblings_shift = System::siblings_shift_for(
                 settings.cursor_vertical_gap, max_entries_displayed,
@@ -121,7 +170,6 @@ impl System {
                 settings.cursor_vertical_gap, max_entries_displayed,
                 current_index, current_siblings.len(), None);
 
-        let sorting_type = SortingType::Any;
 
         System {
             window,
@@ -133,6 +181,7 @@ impl System {
             symlink_paint: settings.symlink_paint,
             file_paint: settings.file_paint,
             unknown_paint: settings.unknown_paint,
+            preview_paint: settings.preview_paint,
 
             columns_coord: System::positions_from_ratio(settings.columns_ratio, width),
 
@@ -140,7 +189,7 @@ impl System {
             current_index,
             current_siblings,
             parent_siblings,
-            child_siblings: System::collect_sorted_children_of(&first_entry_path, &sorting_type),
+            right_column,
             current_permissions: System::string_permissions_for_path(&first_entry_path),
             current_path: first_entry_path,
             parent_path: starting_path,
@@ -163,6 +212,52 @@ impl System {
         }
     }
 //-----------------------------------------------------------------------------
+    fn collect_right_column_of_current(&self) -> RightColumn {
+        System::collect_right_column(&self.current_path, &self.sorting_type, self.max_entries_displayed)
+    }
+
+    fn collect_right_column(path_opt: &Option<PathBuf>, sorting_type: &SortingType,
+            max_height: usize) -> RightColumn {
+        if let Some(path) = path_opt {
+            if System::is_dir_or_symlink(path) {
+                return RightColumn::with_siblings(
+                    System::collect_sorted_children_of(path_opt, sorting_type));
+            } else { // not a dir
+                if let Some(preview) = System::read_preview_of(path, max_height) {
+                    return RightColumn::with_preview(preview);
+                }
+            }
+        }
+        RightColumn::empty()
+    }
+
+    fn read_preview_of(path: &PathBuf, max_height: usize) -> Option<Vec<String>> {
+        let file_name = path.file_name().unwrap().to_str().unwrap();
+        if System::is_previewable(file_name) {
+            let max_per_line = 100;
+            Some(read_lines(path, max_height, max_height as u64 * max_per_line))
+        } else { None }
+    }
+
+    fn is_previewable(file_name: &str) -> bool {
+        for exact_name in System::text_exact_names() {
+            if file_name == exact_name { return true; }
+        }
+        for ext in System::text_extensions() {
+            if file_name.ends_with(ext) { return true; }
+        }
+        false
+    }
+
+    fn text_extensions() -> Vec<&'static str> {
+        vec!["txt", "cpp", "h", "rs", "lock", "toml", "zsh", "java", "py",
+            "sh", "md", "log", "yml", "tex", "nb"]
+    }
+
+    fn text_exact_names() -> Vec<&'static str> {
+        vec!["Makefile", ".gitignore"]
+    }
+
     fn generate_spawn_patterns() -> Vec<SpawnPattern> {
         let add_to_apps = |apps: &mut HashMap<String, (Vec<String>, bool)>,
                 app: &str, spawn_files: Vec<&'static str>, is_external: bool| {
@@ -178,9 +273,8 @@ impl System {
         let external = true; // for convenience and readability
         let not_external = !external;
 
-        add_to_apps(&mut apps_extensions, "vim @", vec!["txt", "cpp", "h", "rs", "lock", "toml", "zsh",
-            "java", "py", "sh", "md", "log", "yml"], not_external);
-        add_to_apps(&mut apps_exact_names, "vim @", vec!["Makefile", ".gitignore"], not_external);
+        add_to_apps(&mut apps_extensions, "vim @", System::text_extensions(), not_external);
+        add_to_apps(&mut apps_exact_names, "vim @", System::text_exact_names(), not_external);
         add_to_apps(&mut apps_extensions, "vlc @", vec!["mkv", "avi", "mp4", "mp3"], external);
 
         let mut patterns: Vec<SpawnPattern> = Vec::new();
@@ -273,6 +367,16 @@ impl System {
         path.push(name);
         Some(path)
     }
+
+    fn current_is_dir_or_symlink(&self) -> bool {
+        if self.current_path.is_some() {
+            System::is_dir_or_symlink(self.current_path.as_ref().unwrap())
+        } else { false }
+    }
+
+    fn is_dir_or_symlink(path: &PathBuf) -> bool {
+        !path.is_file()
+    }
 //-----------------------------------------------------------------------------
     fn update_last_part_of_current_path_by_index(&mut self) {
         let name = self.unsafe_current_entry_ref().name.clone();
@@ -285,6 +389,7 @@ impl System {
         System::sort(collect_siblings_of(&self.parent_path), &self.sorting_type)
     }
 
+    // TODO: mb get rid of Option
     fn collect_sorted_children_of(path: &Option<PathBuf>, sorting_type: &SortingType) -> Vec<Entry> {
         if let Some(path) = path {
             System::sort(collect_maybe_dir(&path), sorting_type)
@@ -343,13 +448,15 @@ impl System {
     fn common_up_down(&mut self) {
         self.update_last_part_of_current_path_by_index();
         self.current_permissions = self.get_current_permissions();
-        self.child_siblings = self.collect_sorted_children_of_current();
+        // self.child_siblings = self.collect_sorted_children_of_current();
+        self.right_column = self.collect_right_column_of_current();
         self.current_siblings_shift = self.recalculate_current_siblings_shift();
     }
 
     fn common_left_right(&mut self) {
         self.current_permissions = self.get_current_permissions();
-        self.child_siblings = self.collect_sorted_children_of_current();
+        // self.child_siblings = self.collect_sorted_children_of_current();
+        self.right_column = self.collect_right_column_of_current();
         self.current_siblings = self.collect_sorted_children_of_parent();
         self.parent_siblings = self.collect_sorted_siblings_of_parent();
     }
@@ -395,7 +502,7 @@ impl System {
                 // Navigate inside
                 self.parent_path = current_path_ref.to_path_buf();
                 self.current_path = System::path_of_first_entry_inside(
-                    current_path_ref, &self.child_siblings);
+                    current_path_ref, self.right_column.siblings_ref().unwrap());
 
                 self.common_left_right();
 
@@ -417,6 +524,28 @@ impl System {
         }
     }
 //-----------------------------------------------------------------------------
+    fn draw_right_column(&self, mut cs: &mut ColorSystem, column_index: usize) {
+        if let Some(siblings) = self.right_column.siblings_ref() {
+            // Have siblings (Some or None) => are sure to be in a dir or symlink
+            if siblings.is_empty() {
+                self.draw_empty_sign(&mut cs, column_index);
+            } else {
+                self.list_entries(&mut cs, column_index, siblings, None, 0);
+            }
+        } else if let Some(preview) = self.right_column.preview_ref() {
+            let (begin, end) = self.columns_coord[column_index];
+            let column_width = end - begin;
+            let y = self.entries_display_begin;
+            cs.set_paint(&self.window, self.preview_paint);
+            for (i, line) in preview.iter().enumerate() {
+                let line = System::maybe_truncate(line.trim_end(), column_width as usize);
+                self.window.mvprintw(y + i as i32, begin + 1, line);
+                // self.window.mvprintw(y + i as i32, 20, line.len().to_string());
+            }
+        } // display nothing otherwise
+    }
+
+
     fn list_entry(&self, cs: &mut ColorSystem, column_index: usize,
             y: usize, entry: &Entry, selected: bool) {
         let paint = match entry.entrytype {
@@ -437,7 +566,7 @@ impl System {
         let y = y as Coord + self.entries_display_begin;
         if empty_space_length < 1 {
             // everything doesn't fit => sacrifice Size and truncate the Name
-            let name = System::truncate_string(&entry.name, column_width);
+            let name = System::truncate_with_delimiter(&entry.name, column_width);
             let name_len = System::chars_amount(&name) as i32;
             let leftover = column_width - name_len;
             self.window.mvprintw(y, begin + 1, &name);
@@ -463,8 +592,8 @@ impl System {
         }
     }
 //-----------------------------------------------------------------------------
-    pub fn clear(&self, color_system: &mut ColorSystem) {
-        color_system.set_paint(&self.window, self.primary_paint);
+    pub fn clear(&self, cs: &mut ColorSystem) {
+        cs.set_paint(&self.window, self.primary_paint);
         for y in 0..self.height {
             self.window.mv(y, 0);
             self.window.hline(' ', self.width);
@@ -491,13 +620,7 @@ impl System {
 
         // Next
         let column_index = 2;
-        if !self.inside_empty_dir() {
-            if self.current_is_dir() && self.child_siblings.is_empty() {
-                self.draw_empty_sign(&mut cs, column_index);
-            } else {
-                self.list_entries(&mut cs, column_index, &self.child_siblings, None, 0);
-            }
-        }
+        self.draw_right_column(&mut cs, column_index);
 
         // Current path
         if !self.inside_empty_dir() {
@@ -608,7 +731,16 @@ impl System {
         }
     }
 //-----------------------------------------------------------------------------
-    fn truncate_string(string: &str, max_length: i32) -> String {
+    fn maybe_truncate(string: &str, max_length: usize) -> String {
+        let mut result = String::new();
+        let mut chars = string.chars().take(max_length);
+        while let Some(c) = chars.next() {
+            result.push(c);
+        }
+        result
+    }
+
+    fn truncate_with_delimiter(string: &str, max_length: i32) -> String {
         let chars_amount = System::chars_amount(&string);
         if chars_amount > max_length as usize {
             let delimiter = "...";

@@ -49,6 +49,7 @@ fn main() {
             symlink_paint: Paint {fg: Color::Yellow, bg: Color::Black, bold: true, underlined: false},
             file_paint: Paint {fg: Color::White, bg: Color::Black, bold: false, underlined: false},
             unknown_paint: Paint {fg: Color::Grey, bg: Color::White, bold: true, underlined: false},
+            preview_paint: Paint {fg: Color::Green, bg: Color::Black, bold: false, underlined: false},
             cursor_vertical_gap: 4,
         },
         starting_path,
