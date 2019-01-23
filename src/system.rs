@@ -179,7 +179,7 @@ impl System {
         let not_external = !external;
 
         add_to_apps(&mut apps_extensions, "vim @", vec!["txt", "cpp", "h", "rs", "lock", "toml", "zsh",
-            "java", "py", "sh", "mb", "log", "yml"], not_external);
+            "java", "py", "sh", "md", "log", "yml"], not_external);
         add_to_apps(&mut apps_exact_names, "vim @", vec!["Makefile", ".gitignore"], not_external);
         add_to_apps(&mut apps_extensions, "vlc @", vec!["mkv", "avi", "mp4", "mp3"], external);
 
