@@ -32,9 +32,16 @@ struct SpawnRule {
 }
 
 impl SpawnRule {
-    fn generate(&self, name: &str) -> (String, bool) {
+    fn generate(&self, file_name: &str) -> (String, Vec<String>, bool) {
         let placeholder = "@";
-        (self.rule.replace(placeholder, name), self.is_external)
+        let mut args = Vec::new();
+        let mut parts = self.rule.split_whitespace();
+        let app = parts.next().unwrap();
+        for arg in parts { // the rest
+            if arg == placeholder { args.push(file_name.to_string()); }
+            else                  { args.push(arg.to_string()); }
+        }
+        (app.to_string(), args, self.is_external)
     }
 }
 
@@ -303,22 +310,22 @@ impl System {
         patterns
     }
 
-    fn spawn_rule_for(&self, file_name: &str, full_path: &str) -> Option<(String, bool)> {
+    fn spawn_rule_for(&self, file_name: &str, full_path: &str) -> Option<(String, Vec<String>, bool)> {
         for SpawnPattern { file, rule } in self.spawn_patterns.iter() {
             match file {
                 SpawnFile::Extension(ext) => if file_name.to_ascii_lowercase()
                                                     .ends_with(ext.as_str()) {
-                    return Some(rule.clone().generate(full_path));
+                    return Some(rule.generate(full_path));
                 },
                 SpawnFile::ExactName(name) => if file_name == name {
-                    return Some(rule.clone().generate(full_path));
+                    return Some(rule.generate(full_path));
                 }
             }
         }
         None
     }
-//-----------------------------------------------------------------------------
-    fn spawn(app: &str, args: Vec<&str>, external: bool) {
+
+    fn spawn(app: &str, args: Vec<String>, external: bool) {
         if external {
             Command::new(app).args(args)
                 .stderr(Stdio::null())
@@ -525,11 +532,8 @@ impl System {
                 // Try to open with default app
                 let file_name = current_entry.name.as_str();
                 let full_path = current_path_ref.to_str().unwrap();
-                if let Some((rule, is_external)) = self.spawn_rule_for(file_name, full_path) {
-                    let mut parts = rule.split_whitespace();
-                    let app = parts.next().unwrap(); // first part
-                    let args = parts.collect(); // all subsequent parts
-                    System::spawn(app, args, is_external);
+                if let Some((app, args, is_external)) = self.spawn_rule_for(file_name, full_path) {
+                    System::spawn(&app, args, is_external);
                 }
             }
         }
