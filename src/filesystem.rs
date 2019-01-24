@@ -136,6 +136,7 @@ pub fn read_lines(path: &PathBuf, amount: usize, max_bytes: u64) -> Vec<String> 
     for _ in 0..amount {
         let mut line = String::new();
         let result = reader.read_line(&mut line);
+        if line.is_empty() { return lines; }
         if result.is_err() { return lines; }
         lines.push(line);
     }

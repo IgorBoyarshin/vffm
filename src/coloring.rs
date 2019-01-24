@@ -28,6 +28,7 @@ pub enum Color {
     Cyan,
     White,
     Grey,
+    Default, // Transparent
     RGB(i16, i16, i16),
 }
 
@@ -72,6 +73,7 @@ fn get_rgb(color: Color) -> RGB {
         Color::Cyan => (0, 1000, 1000),
         Color::White => (1000, 1000, 1000),
         Color::Grey => (400, 400, 400),
+        Color::Default => (0, 0, 0), // Is handled in get_maybe_add_color(). Should not be used here
     }
 }
 //-----------------------------------------------------------------------------
@@ -133,6 +135,7 @@ impl ColorSystem {
     }
 
     fn get_maybe_add_color(&mut self, color: Color) -> ColorId {
+        if color == Color::Default { return -1; }
         if !self.colors.contains_key(&color) {
             self.colors.insert(color, self.next_colorid_to_use);
             let (r, g, b) = get_rgb(color);

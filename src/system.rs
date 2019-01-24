@@ -13,6 +13,17 @@ use std::collections::HashMap;
 use std::ops::RangeBounds;
 
 type Coord = i32;
+
+
+fn mvprintw(window: &Window, y: i32, x: i32, string: &str) -> i32 {
+    let string = string.to_string().replace("%", "%%");
+    window.mvprintw(y, x, string)
+}
+fn printw(window: &Window, string: &str) -> i32 {
+    let string = string.to_string().replace("%", "%%");
+    window.printw(string)
+}
+
 //-----------------------------------------------------------------------------
 #[derive(Clone)]
 struct SpawnRule {
@@ -151,7 +162,7 @@ impl System {
         let window = System::setup();
         let (height, width) = System::get_height_width(&window);
         let primary_paint =
-            Paint{fg: Color::White, bg: Color::Black, bold: false, underlined: false};
+            Paint{fg: Color::White, bg: Color::Default, bold: false, underlined: false};
         let sorting_type = SortingType::Any;
 
         let current_siblings = collect_maybe_dir(&starting_path);
@@ -539,8 +550,7 @@ impl System {
             cs.set_paint(&self.window, self.preview_paint);
             for (i, line) in preview.iter().enumerate() {
                 let line = System::maybe_truncate(line.trim_end(), column_width as usize);
-                self.window.mvprintw(y + i as i32, begin + 1, line);
-                // self.window.mvprintw(y + i as i32, 20, line.len().to_string());
+                mvprintw(&self.window, y + i as i32, begin + 1, &line);
             }
         } // display nothing otherwise
     }
@@ -569,14 +579,14 @@ impl System {
             let name = System::truncate_with_delimiter(&entry.name, column_width);
             let name_len = System::chars_amount(&name) as i32;
             let leftover = column_width - name_len;
-            self.window.mvprintw(y, begin + 1, &name);
+            mvprintw(&self.window, y, begin + 1, &name);
             self.window.mv(y, begin + 1 + name_len);
             self.window.hline(' ', leftover);
         } else { // everything fits OK
-            self.window.mvprintw(y, begin + 1, &entry.name);
+            mvprintw(&self.window, y, begin + 1, &entry.name);
             self.window.mv(y, begin + 1 + name_len);
             self.window.hline(' ', empty_space_length);
-            self.window.mvprintw(y, begin + 1 + name_len + empty_space_length, size);
+            mvprintw(&self.window, y, begin + 1 + name_len + empty_space_length, &size);
         }
     }
 
@@ -624,25 +634,25 @@ impl System {
 
         // Current path
         if !self.inside_empty_dir() {
-            cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Black,
+            cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Default,
                                                 bold: false, underlined: false});
-            self.window.mvprintw(0, 0,
+            mvprintw(&self.window, 0, 0,
                          self.current_path.as_ref().unwrap().to_str().unwrap());
         }
 
         // Current permissions
         if self.current_path.is_some() {
-            cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Black,
+            cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Default,
                                                 bold: false, underlined: false});
-            self.window.mvprintw(self.height - 1, 0, &self.current_permissions);
+            mvprintw(&self.window, self.height - 1, 0, &self.current_permissions);
         }
 
         // Current size
         if self.current_path.is_some() {
-            cs.set_paint(&self.window, Paint{fg: Color::Blue, bg: Color::Black,
+            cs.set_paint(&self.window, Paint{fg: Color::Blue, bg: Color::Default,
                                                 bold: false, underlined: false});
-            self.window.mvprintw(self.height - 1, 12,
-                         System::human_size(self.unsafe_current_entry_ref().size));
+            mvprintw(&self.window, self.height - 1, 12,
+                         &System::human_size(self.unsafe_current_entry_ref().size));
         }
 
         self.window.refresh();
@@ -667,11 +677,11 @@ impl System {
             // Completed part
             cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
                                                 bold: true, underlined: false});
-            self.window.mvprintw(y, 0, &completed_part);
+            mvprintw(&self.window, y, 0, &completed_part);
             // Uncompleted part
             cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
                                                 bold: false, underlined: false});
-            self.window.printw(&uncompleted_part);
+            printw(&self.window, &uncompleted_part);
             // Space till description
             let left = max_len - combination.len() as i32;
             self.window.hline(' ', left);
@@ -680,7 +690,7 @@ impl System {
             cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
                                                 bold: false, underlined: false});
             let description = description_of(&command);
-            self.window.mvprintw(y, max_len as i32, &description);
+            mvprintw(&self.window, y, max_len as i32, &description);
             // Space till end
             let left = self.width - max_len - description.len() as i32;
             self.window.hline(' ', left);
@@ -690,7 +700,7 @@ impl System {
     fn draw_empty_sign(&self, cs: &mut ColorSystem, column_index: usize) {
         cs.set_paint(&self.window, Paint{fg: Color::Black, bg: Color::Red, bold: true, underlined: false});
         let (begin, _) = self.columns_coord[column_index];
-        self.window.mvprintw(self.entries_display_begin, begin + 1, "empty");
+        mvprintw(&self.window, self.entries_display_begin, begin + 1, "empty");
     }
 
     fn draw_column(&self, color_system: &mut ColorSystem, x: Coord) {
@@ -782,7 +792,8 @@ impl System {
 
     fn maybe_selected_paint_from(paint: Paint, convert: bool) -> Paint {
         if convert {
-            let Paint {fg, bg, bold: _, underlined} = paint;
+            let Paint {fg, mut bg, bold: _, underlined} = paint;
+            if bg == Color::Default { bg = Color:: Black; }
             Paint {fg: bg, bg: fg, bold: true, underlined}
         } else { paint }
     }
@@ -839,6 +850,7 @@ impl System {
         window.refresh();
         window.keypad(true);
         start_color();
+        use_default_colors();
         noecho();
 
         window
