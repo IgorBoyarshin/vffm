@@ -45,7 +45,7 @@ fn main() {
 
     let mut system = System::new(
         Settings {
-            columns_ratio: vec![2,3,2],
+            columns_ratio: vec![2,3,3],
             dir_paint: Paint {fg: Color::Cyan, bg: Color::Default, bold: true, underlined: false},
             symlink_paint: Paint {fg: Color::Yellow, bg: Color::Default, bold: true, underlined: false},
             file_paint: Paint {fg: Color::White, bg: Color::Default, bold: false, underlined: false},

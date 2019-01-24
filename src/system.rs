@@ -262,7 +262,7 @@ impl System {
 
     fn text_extensions() -> Vec<&'static str> {
         vec!["txt", "cpp", "h", "rs", "lock", "toml", "zsh", "java", "py",
-            "sh", "md", "log", "yml", "tex", "nb"]
+            "sh", "md", "log", "yml", "tex", "nb", "js", "ts", "html", "css", "json"]
     }
 
     fn text_exact_names() -> Vec<&'static str> {
@@ -743,6 +743,7 @@ impl System {
 //-----------------------------------------------------------------------------
     fn maybe_truncate(string: &str, max_length: usize) -> String {
         let mut result = String::new();
+        let string = string.replace("\t", "    "); // assume tab_size=4
         let mut chars = string.chars().take(max_length);
         while let Some(c) = chars.next() {
             result.push(c);
