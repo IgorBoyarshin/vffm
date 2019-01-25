@@ -179,8 +179,11 @@ impl System {
         let display_settings = System::generate_display_settings(
             &window, settings.scrolling_gap, &settings.columns_ratio);
 
+        let column_index = 2;
+        let (begin, end) = display_settings.columns_coord[column_index];
+        let column_width = (end - begin) as usize;
         let right_column = System::collect_right_column(&first_entry_path,
-                        &sorting_type, display_settings.column_effective_height);
+                        &sorting_type, display_settings.column_effective_height, column_width);
 
         let parent_siblings_shift = System::siblings_shift_for(
                 display_settings.scrolling_gap, display_settings.column_effective_height,
@@ -236,12 +239,15 @@ impl System {
     }
 
     fn collect_right_column_of_current(&self) -> RightColumn {
+        let column_index = 2;
+        let (begin, end) = self.display_settings.columns_coord[column_index];
+        let column_width = (end - begin) as usize;
         System::collect_right_column(&self.current_path, &self.sorting_type,
-                                     self.display_settings.column_effective_height)
+                                     self.display_settings.column_effective_height, column_width)
     }
 
     fn collect_right_column(path_opt: &Option<PathBuf>, sorting_type: &SortingType,
-            max_height: usize) -> RightColumn {
+            max_height: usize, max_width: usize) -> RightColumn {
         if let Some(path) = path_opt {
             if path.is_dir() { // resolved path
                 return RightColumn::with_siblings(
@@ -249,7 +255,10 @@ impl System {
             } else { // resolved path is a regular file
                 let path = maybe_resolve_symlink(path);
                 if let Some(preview) = System::read_preview_of(&path, max_height) {
-                    return RightColumn::with_preview(preview);
+                    let truncated_preview: Vec<String> = preview.into_iter()
+                        .map(|line| System::maybe_truncate(line.trim_end(), max_width))
+                        .collect();
+                    return RightColumn::with_preview(truncated_preview);
                 }
             }
         }
@@ -637,13 +646,11 @@ impl System {
                 self.list_entries(&mut cs, column_index, siblings, None, 0);
             }
         } else if let Some(preview) = self.right_column.preview_ref() {
-            let (begin, end) = self.display_settings.columns_coord[column_index];
-            let column_width = end - begin;
+            let (begin, _) = self.display_settings.columns_coord[column_index];
             let y = self.display_settings.entries_display_begin;
             cs.set_paint(&self.window, self.settings.preview_paint);
             for (i, line) in preview.iter().enumerate() {
-                let line = System::maybe_truncate(line.trim_end(), column_width as usize);
-                mvprintw(&self.window, y + i as i32, begin + 1, &line);
+                mvprintw(&self.window, y + i as i32, begin + 1, line);
             }
         } // display nothing otherwise
     }
