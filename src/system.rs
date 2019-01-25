@@ -375,6 +375,7 @@ impl System {
 //-----------------------------------------------------------------------------
     pub fn sort_with(&mut self, new_sorting_type: SortingType) {
         self.sorting_type = new_sorting_type;
+        self.update_current();
     }
 
     fn sort(mut entries: Vec<Entry>, sorting_type: &SortingType) -> Vec<Entry> {
@@ -399,7 +400,9 @@ impl System {
     fn get_symlink_target(path: &Option<PathBuf>) -> Option<String> {
         if let Some(path) = path {
             if is_symlink(path) {
-                return Some(path_to_str(&resolve_symlink(path)).to_string());
+                if let Some(resolved) = resolve_symlink(path) {
+                    return Some(path_to_str(&resolved).to_string());
+                }
             }
         }
         None
@@ -408,7 +411,7 @@ impl System {
     fn get_symlink_target_for_current(&self) -> Option<String> {
         System::get_symlink_target(&self.current_path)
     }
-    //
+
     // fn current_entry_ref(&self) -> Option<&Entry> {
     //     if self.current_path.is_some() { Some(self.unsafe_current_entry_ref()) }
     //     else { None }
@@ -962,11 +965,11 @@ impl System {
             &self.window, self.settings.scrolling_gap, &self.settings.columns_ratio);
         self.right_column = self.collect_right_column_of_current();
         self.parent_siblings_shift = System::siblings_shift_for(
-                self.display_settings.scrolling_gap, self.display_settings.column_effective_height,
-                self.parent_index, self.parent_siblings.len(), None);
+            self.display_settings.scrolling_gap, self.display_settings.column_effective_height,
+            self.parent_index, self.parent_siblings.len(), None);
         self.current_siblings_shift = System::siblings_shift_for(
-                self.display_settings.scrolling_gap, self.display_settings.column_effective_height,
-                self.current_index, self.current_siblings.len(), None);
+            self.display_settings.scrolling_gap, self.display_settings.column_effective_height,
+            self.current_index, self.current_siblings.len(), None);
     }
 }
 

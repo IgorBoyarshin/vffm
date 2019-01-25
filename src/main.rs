@@ -34,11 +34,11 @@ fn vec_of_refs<'a, T>(array: &'a Vec<T>) -> Vec<&'a T> {
 fn main() {
     let mut color_system = ColorSystem::new();
     // let starting_path = PathBuf::from("/home/igorek/Stuff");
-    // let starting_path = PathBuf::from("/home/igorek/.config/google-chrome");
-    let mut starting_path = absolute_pathbuf();
-    starting_path.pop();
-    starting_path.pop();
-    starting_path.pop();
+    let starting_path = PathBuf::from("/home/igorek/.config/google-chrome");
+    // let mut starting_path = absolute_pathbuf();
+    // starting_path.pop();
+    // starting_path.pop();
+    // starting_path.pop();
 
     let mut system = System::new(
         Settings {
