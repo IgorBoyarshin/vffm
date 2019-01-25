@@ -88,6 +88,7 @@ fn main() {
                         Command::Sort(sorting_type) => system.sort_with(*sorting_type),
                         Command::GoTo(_path)        => {},
                         Command::Remove             => system.remove_selected(),
+                        Command::Update             => system.update_current(),
                     }
                 }
 

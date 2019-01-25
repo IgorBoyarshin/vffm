@@ -345,11 +345,11 @@ impl System {
 //-----------------------------------------------------------------------------
     fn remove(path: &PathBuf) {
         if path.is_dir() {
-            // TODO
+            System::spawn("rm", vec!["-r", "-f", path_to_str(path)], false);
         } else if path.is_file() {
             System::spawn("rm", vec!["-f", path_to_str(path)], false);
         } else { // is symlink
-            // TODO
+            System::spawn("unlink", vec![path_to_str(path)], false);
         }
     }
 
@@ -426,7 +426,7 @@ impl System {
     // }
 
     // Update central column and right column
-    fn update_current(&mut self) {
+    pub fn update_current(&mut self) {
         self.current_siblings = self.collect_sorted_children_of_parent();
         let len = self.current_siblings.len();
         self.current_index =
