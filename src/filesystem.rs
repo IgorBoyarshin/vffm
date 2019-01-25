@@ -1,4 +1,4 @@
-use std::path::Path;
+// use std::path::Path;
 use std::path::PathBuf;
 use std::fs::{self, DirEntry};
 use std::io::BufReader;
@@ -6,7 +6,8 @@ use std::io::BufRead;
 
 
 //-----------------------------------------------------------------------------
-use std::time::{SystemTime, UNIX_EPOCH};
+// use std::time::{SystemTime};
+// use std::time::{UNIX_EPOCH};
 use std::fs::OpenOptions;
 use std::fs::File;
 use std::os::unix::fs::PermissionsExt;
@@ -16,8 +17,8 @@ pub fn log(s: &str) {
     // let name = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string();
     let name = "log.txt";
     let mut file = OpenOptions::new().append(true).create(true).open(name).unwrap();
-    file.write_all(s.as_bytes());
-    file.write_all(b"\n");
+    file.write_all(s.as_bytes()).unwrap();
+    file.write_all(b"\n").unwrap();
 }
 //-----------------------------------------------------------------------------
 pub struct Permissions {
@@ -85,21 +86,21 @@ pub fn permissions_of(path: &PathBuf) -> Permissions {
     }
 }
 //-----------------------------------------------------------------------------
-pub fn modify_time(path: &PathBuf) -> u64 {
-    fs::metadata(path).expect("Could not read metadata")
-        .modified().expect("Could not read modify time")
-        .duration_since(UNIX_EPOCH).unwrap().as_secs()
-}
-pub fn create_time(path: &PathBuf) -> u64 {
-    fs::metadata(path).expect("Could not read metadata")
-        .created().expect("Could not read create time")
-        .duration_since(UNIX_EPOCH).unwrap().as_secs()
-}
-pub fn access_time(path: &PathBuf) -> u64 {
-    fs::metadata(path).expect("Could not read metadata")
-        .accessed().expect("Could not read access time")
-        .duration_since(UNIX_EPOCH).unwrap().as_secs()
-}
+// pub fn modify_time(path: &PathBuf) -> u64 {
+//     fs::metadata(path).expect("Could not read metadata")
+//         .modified().expect("Could not read modify time")
+//         .duration_since(UNIX_EPOCH).unwrap().as_secs()
+// }
+// pub fn create_time(path: &PathBuf) -> u64 {
+//     fs::metadata(path).expect("Could not read metadata")
+//         .created().expect("Could not read create time")
+//         .duration_since(UNIX_EPOCH).unwrap().as_secs()
+// }
+// pub fn access_time(path: &PathBuf) -> u64 {
+//     fs::metadata(path).expect("Could not read metadata")
+//         .accessed().expect("Could not read access time")
+//         .duration_since(UNIX_EPOCH).unwrap().as_secs()
+// }
 //-----------------------------------------------------------------------------
 #[derive(PartialEq, Eq, Clone)]
 pub enum EntryType {
@@ -261,9 +262,9 @@ pub fn index_inside(path: &PathBuf) -> usize {
 //         .to_str().unwrap().to_string()
 // }
 //
-pub fn absolute_pathbuf() -> PathBuf {
-    std::env::current_exe().expect("Cannot get absolute PathBuf")
-}
+// pub fn absolute_pathbuf() -> PathBuf {
+//     std::env::current_exe().expect("Cannot get absolute PathBuf")
+// }
 
 pub fn is_root(path: &PathBuf) -> bool {
     path.parent() == None

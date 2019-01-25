@@ -24,12 +24,12 @@ pub enum Color {
     LightBlue,
     Yellow,
     Blue,
-    Purple,
+    // Purple,
     Cyan,
     White,
     Grey,
     Default, // Transparent
-    RGB(i16, i16, i16),
+    // RGB(i16, i16, i16),
 }
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone)]
@@ -54,23 +54,23 @@ impl Paint {
         self.bold = true;
         self
     }
-
-    pub fn underlined(mut self) -> Self {
-        self.underlined = true;
-        self
-    }
+    //
+    // pub fn underlined(mut self) -> Self {
+    //     self.underlined = true;
+    //     self
+    // }
 }
 
 fn get_rgb(color: Color) -> RGB {
     match color {
-        Color::RGB(r, g, b) => (r, g, b),
+        // Color::RGB(r, g, b) => (r, g, b),
         Color::Black => (0, 0, 0),
         Color::Red => (1000, 0, 0),
         Color::Green => (0, 1000, 0),
         Color::LightBlue => (433, 735, 966),
         Color::Yellow => (1000, 1000, 0),
         Color::Blue => (0, 0, 1000),
-        Color::Purple => (500, 0, 500),
+        // Color::Purple => (500, 0, 500),
         Color::Cyan => (0, 1000, 1000),
         Color::White => (1000, 1000, 1000),
         Color::Grey => (400, 400, 400),

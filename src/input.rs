@@ -8,7 +8,7 @@ pub enum SortingType {
 pub type Combination = String;
 pub enum Command {
     Terminate,
-    GoTo(String),
+    GoTo(&'static str),
     Up(u32),
     Down(u32),
     Left,
@@ -36,13 +36,14 @@ pub fn generate_possible_inputs() -> Vec<(Combination, Command)> {
     inputs.push(("sl".to_string(), Command::Sort(SortingType::Lexicographically)));
     inputs.push(("st".to_string(), Command::Sort(SortingType::TimeModified)));
     inputs.push(("sa".to_string(), Command::Sort(SortingType::Any)));
+    inputs.push(("gh".to_string(), Command::GoTo("/home/igorek/")));
     inputs
 }
 
 pub fn description_of(command: &Command) -> String {
     match command {
         Command::Terminate => "Close the program".to_string(),
-        Command::GoTo(path) => "Go to ".to_string() + path.as_str(),
+        Command::GoTo(path) => "Go to ".to_string() + path,
         Command::Up(n) => format!("Navigate up one entry in the list {} times", n),
         Command::Down(n) => format!("Navigate down one entry in the list {} times", n),
         Command::Left => "Navigate to the parent directory".to_string(),

@@ -1,15 +1,13 @@
 use pancurses::*;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::collections::HashMap;
+use std::ops::RangeBounds;
+
 use crate::coloring::*;
 use crate::filesystem::*;
 use crate::input::*;
 
-use std::path::PathBuf;
-
-use std::process::{Command, Stdio};
-
-use std::collections::HashMap;
-
-use std::ops::RangeBounds;
 
 
 type Coord = i32;
