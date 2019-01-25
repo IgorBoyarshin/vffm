@@ -52,7 +52,7 @@ fn main() {
             file_paint: Paint {fg: Color::White, bg: Color::Default, bold: false, underlined: false},
             unknown_paint: Paint {fg: Color::Grey, bg: Color::White, bold: true, underlined: false},
             preview_paint: Paint {fg: Color::Green, bg: Color::Default, bold: false, underlined: false},
-            cursor_vertical_gap: 4,
+            scrolling_gap: 4,
         },
         starting_path,
     );

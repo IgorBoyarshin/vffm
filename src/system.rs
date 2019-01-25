@@ -1,5 +1,4 @@
 use pancurses::*;
-
 use crate::coloring::*;
 use crate::filesystem::*;
 use crate::input::*;
@@ -12,18 +11,19 @@ use std::collections::HashMap;
 
 use std::ops::RangeBounds;
 
+
 type Coord = i32;
-
-
-fn mvprintw(window: &Window, y: i32, x: i32, string: &str) -> i32 {
-    let string = string.to_string().replace("%", "%%");
-    window.mvprintw(y, x, string)
-}
+//-----------------------------------------------------------------------------
 fn printw(window: &Window, string: &str) -> i32 {
+    // To avoid printw's substitution
     let string = string.to_string().replace("%", "%%");
     window.printw(string)
 }
 
+fn mvprintw(window: &Window, y: i32, x: i32, string: &str) -> i32 {
+    window.mv(y, x);
+    printw(window, string)
+}
 //-----------------------------------------------------------------------------
 #[derive(Clone)]
 struct SpawnRule {
@@ -124,7 +124,7 @@ pub struct Settings {
     pub preview_paint: Paint,
 
     pub columns_ratio: Vec<u32>,
-    pub cursor_vertical_gap: usize,
+    pub scrolling_gap: usize,
 }
 
 struct DisplaySettings {
@@ -132,14 +132,13 @@ struct DisplaySettings {
     width:  Coord,
     columns_coord: Vec<(Coord, Coord)>,
 
-    cursor_vertical_gap: usize, // const
-    max_entries_displayed: usize, // const
+    scrolling_gap: usize, // const
+    column_effective_height: usize, // const
     entries_display_begin: i32, // const
 }
 
 pub struct System {
     window: Window,
-
     settings: Settings,
     display_settings: DisplaySettings,
 
@@ -153,13 +152,11 @@ pub struct System {
     parent_index: usize,
     current_index: usize,
 
-    parent_siblings_shift: usize,
-    current_siblings_shift: usize,
+    parent_siblings_shift: usize, // depends on display_settings
+    current_siblings_shift: usize, // depends on display_settings
 
     current_permissions: String,
-
     sorting_type: SortingType,
-
     spawn_patterns: Vec<SpawnPattern>, // const
 }
 
@@ -177,16 +174,16 @@ impl System {
         let current_index = 0;
 
         let display_settings = System::generate_display_settings(
-            &window, settings.cursor_vertical_gap, &settings.columns_ratio);
+            &window, settings.scrolling_gap, &settings.columns_ratio);
 
         let right_column = System::collect_right_column(&first_entry_path,
-                        &sorting_type, display_settings.max_entries_displayed);
+                        &sorting_type, display_settings.column_effective_height);
 
         let parent_siblings_shift = System::siblings_shift_for(
-                display_settings.cursor_vertical_gap, display_settings.max_entries_displayed,
+                display_settings.scrolling_gap, display_settings.column_effective_height,
                 parent_index, parent_siblings.len(), None);
         let current_siblings_shift = System::siblings_shift_for(
-                display_settings.cursor_vertical_gap, display_settings.max_entries_displayed,
+                display_settings.scrolling_gap, display_settings.column_effective_height,
                 current_index, current_siblings.len(), None);
 
         System {
@@ -213,30 +210,31 @@ impl System {
     }
 //-----------------------------------------------------------------------------
     fn generate_display_settings(
-            window: &Window, cursor_vertical_gap: usize, columns_ratio: &Vec<u32>)
+            window: &Window, scrolling_gap: usize, columns_ratio: &Vec<u32>)
             -> DisplaySettings {
         let (height, width) = System::get_height_width(window);
-        let max_entries_displayed = height as usize - 4; // gap+border+border+gap
-        let cursor_vertical_gap =
-            System::resize_cursor_gap_until_fits(cursor_vertical_gap, max_entries_displayed);
+        let column_effective_height = height as usize - 4; // gap+border+border+gap
+        let scrolling_gap = System::resize_scrolling_gap_until_fits(
+            scrolling_gap, column_effective_height);
+        let columns_coord = System::positions_from_ratio(columns_ratio, width);
         DisplaySettings {
             height,
             width,
-            columns_coord: System::positions_from_ratio(columns_ratio, width),
-            cursor_vertical_gap,
-            max_entries_displayed,
+            columns_coord,
+            scrolling_gap,
+            column_effective_height,
             entries_display_begin: 2, // gap + border
         }
     }
 
-    fn resize_cursor_gap_until_fits(mut gap: usize, max_entries_displayed: usize) -> usize {
-        while 2 * gap >= max_entries_displayed { gap -= 1; } // gap too large
+    fn resize_scrolling_gap_until_fits(mut gap: usize, column_effective_height: usize) -> usize {
+        while 2 * gap >= column_effective_height { gap -= 1; } // gap too large
         gap
     }
 
     fn collect_right_column_of_current(&self) -> RightColumn {
         System::collect_right_column(&self.current_path, &self.sorting_type,
-                                     self.display_settings.max_entries_displayed)
+                                     self.display_settings.column_effective_height)
     }
 
     fn collect_right_column(path_opt: &Option<PathBuf>, sorting_type: &SortingType,
@@ -374,10 +372,10 @@ impl System {
         &self.current_siblings[self.current_index]
     }
 
-    fn current_is_dir(&self) -> bool {
-        if self.inside_empty_dir() { return false; }
-        self.unsafe_current_entry_ref().is_dir()
-    }
+    // fn current_is_dir(&self) -> bool {
+    //     if self.inside_empty_dir() { return false; }
+    //     self.unsafe_current_entry_ref().is_dir()
+    // }
 
     fn inside_empty_dir(&self) -> bool {
         self.current_path.is_none()
@@ -391,11 +389,11 @@ impl System {
         Some(path)
     }
 
-    fn current_is_dir_or_symlink(&self) -> bool {
-        if self.current_path.is_some() {
-            System::is_dir_or_symlink(self.current_path.as_ref().unwrap())
-        } else { false }
-    }
+    // fn current_is_dir_or_symlink(&self) -> bool {
+    //     if self.current_path.is_some() {
+    //         System::is_dir_or_symlink(self.current_path.as_ref().unwrap())
+    //     } else { false }
+    // }
 
     fn is_dir_or_symlink(path: &PathBuf) -> bool {
         !path.is_file()
@@ -458,27 +456,25 @@ impl System {
 
     fn recalculate_parent_siblings_shift(&mut self) -> usize {
         System::siblings_shift_for(
-            self.display_settings.cursor_vertical_gap, self.display_settings.max_entries_displayed,
+            self.display_settings.scrolling_gap, self.display_settings.column_effective_height,
             self.parent_index, self.parent_siblings.len(), None)
     }
 
     fn recalculate_current_siblings_shift(&mut self) -> usize {
         System::siblings_shift_for(
-            self.display_settings.cursor_vertical_gap, self.display_settings.max_entries_displayed,
+            self.display_settings.scrolling_gap, self.display_settings.column_effective_height,
             self.current_index, self.current_siblings.len(), Some(self.current_siblings_shift))
     }
 
     fn common_up_down(&mut self) {
         self.update_last_part_of_current_path_by_index();
         self.current_permissions = self.get_current_permissions();
-        // self.child_siblings = self.collect_sorted_children_of_current();
         self.right_column = self.collect_right_column_of_current();
         self.current_siblings_shift = self.recalculate_current_siblings_shift();
     }
 
     fn common_left_right(&mut self) {
         self.current_permissions = self.get_current_permissions();
-        // self.child_siblings = self.collect_sorted_children_of_current();
         self.right_column = self.collect_right_column_of_current();
         self.current_siblings = self.collect_sorted_children_of_parent();
         self.parent_siblings = self.collect_sorted_siblings_of_parent();
@@ -544,7 +540,50 @@ impl System {
         }
     }
 //-----------------------------------------------------------------------------
-    fn draw_right_column(&self, mut cs: &mut ColorSystem, column_index: usize) {
+    fn draw_current_size(&self, cs: &mut ColorSystem) {
+        if self.current_path.is_some() {
+            cs.set_paint(&self.window, Paint{fg: Color::Blue, bg: Color::Default,
+                                                bold: false, underlined: false});
+            mvprintw(&self.window, self.display_settings.height - 1, 12,
+                         &System::human_size(self.unsafe_current_entry_ref().size));
+        }
+    }
+
+    fn draw_current_path(&self, cs: &mut ColorSystem) {
+        if !self.inside_empty_dir() {
+            cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Default,
+                                                bold: false, underlined: false});
+            mvprintw(&self.window, 0, 0,
+                         self.current_path.as_ref().unwrap().to_str().unwrap());
+        }
+    }
+
+    fn draw_current_permission(&self, cs: &mut ColorSystem) {
+        if self.current_path.is_some() {
+            cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Default,
+                                                bold: false, underlined: false});
+            mvprintw(&self.window, self.display_settings.height - 1, 0, &self.current_permissions);
+        }
+    }
+
+    fn draw_left_column(&self, mut cs: &mut ColorSystem) {
+        let column_index = 0;
+        self.list_entries(&mut cs, column_index, &self.parent_siblings,
+              Some(self.parent_index), self.parent_siblings_shift);
+    }
+
+    fn draw_middle_column(&self, mut cs: &mut ColorSystem) {
+        let column_index = 1;
+        if self.inside_empty_dir() {
+            self.draw_empty_sign(&mut cs, column_index);
+        } else {
+            self.list_entries(&mut cs, column_index, &self.current_siblings,
+              Some(self.current_index), self.current_siblings_shift);
+        }
+    }
+
+    fn draw_right_column(&self, mut cs: &mut ColorSystem) {
+        let column_index = 2;
         if let Some(siblings) = self.right_column.siblings_ref() {
             // Have siblings (Some or None) => are sure to be in a dir or symlink
             if siblings.is_empty() {
@@ -602,7 +641,7 @@ impl System {
     fn list_entries(&self, mut cs: &mut ColorSystem, column_index: usize,
             entries: &Vec<Entry>, selected_index: Option<usize>, shift: usize) {
         for (index, entry) in entries.into_iter().enumerate()
-                .skip(shift).take(self.display_settings.max_entries_displayed) {
+                .skip(shift).take(self.display_settings.column_effective_height) {
             let selected = match selected_index {
                 Some(i) => (i == index),
                 None    => false,
@@ -623,46 +662,13 @@ impl System {
     pub fn draw(&self, mut cs: &mut ColorSystem) {
         self.draw_borders(&mut cs);
 
-        // Previous
-        let column_index = 0;
-        self.list_entries(&mut cs, column_index, &self.parent_siblings,
-              Some(self.parent_index), self.parent_siblings_shift);
+        self.draw_left_column(&mut cs);
+        self.draw_middle_column(&mut cs);
+        self.draw_right_column(&mut cs);
 
-        // Current
-        let column_index = 1;
-        if self.inside_empty_dir() {
-            self.draw_empty_sign(&mut cs, column_index);
-        } else {
-            self.list_entries(&mut cs, column_index, &self.current_siblings,
-              Some(self.current_index), self.current_siblings_shift);
-        }
-
-        // Next
-        let column_index = 2;
-        self.draw_right_column(&mut cs, column_index);
-
-        // Current path
-        if !self.inside_empty_dir() {
-            cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Default,
-                                                bold: false, underlined: false});
-            mvprintw(&self.window, 0, 0,
-                         self.current_path.as_ref().unwrap().to_str().unwrap());
-        }
-
-        // Current permissions
-        if self.current_path.is_some() {
-            cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Default,
-                                                bold: false, underlined: false});
-            mvprintw(&self.window, self.display_settings.height - 1, 0, &self.current_permissions);
-        }
-
-        // Current size
-        if self.current_path.is_some() {
-            cs.set_paint(&self.window, Paint{fg: Color::Blue, bg: Color::Default,
-                                                bold: false, underlined: false});
-            mvprintw(&self.window, self.display_settings.height - 1, 12,
-                         &System::human_size(self.unsafe_current_entry_ref().size));
-        }
+        self.draw_current_path(&mut cs);
+        self.draw_current_permission(&mut cs);
+        self.draw_current_size(&mut cs);
 
         self.window.refresh();
     }
@@ -670,6 +676,8 @@ impl System {
     pub fn draw_available_matches(&self, cs: &mut ColorSystem,
             matches: &Matches, completion_count: usize) {
         if matches.is_empty() { return; }
+
+        // Borders
         cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
                                             bold: false, underlined: false});
         let y = self.display_settings.height - 2 - matches.len() as i32 - 1;
@@ -677,20 +685,20 @@ impl System {
         self.window.hline(ACS_HLINE(), self.display_settings.width);
         self.window.mv(self.display_settings.height - 2, 0);
         self.window.hline(ACS_HLINE(), self.display_settings.width);
+
+        let max_len = max_combination_len() as i32;
         for (i, (combination, command)) in matches.iter().enumerate() {
             let y = y + 1 + i as i32;
-            let max_len = max_combination_len() as i32;
 
             // Combination
             let (completed_part, uncompleted_part) = combination.split_at(completion_count);
-            // Completed part
             cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
                                                 bold: true, underlined: false});
             mvprintw(&self.window, y, 0, &completed_part);
-            // Uncompleted part
             cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
                                                 bold: false, underlined: false});
             printw(&self.window, &uncompleted_part);
+
             // Space till description
             let left = max_len - combination.len() as i32;
             self.window.hline(' ', left);
@@ -700,6 +708,7 @@ impl System {
                                                 bold: false, underlined: false});
             let description = description_of(&command);
             mvprintw(&self.window, y, max_len as i32, &description);
+
             // Space till end
             let left = self.display_settings.width - max_len - description.len() as i32;
             self.window.hline(' ', left);
@@ -724,23 +733,24 @@ impl System {
 
     fn draw_borders(&self, color_system: &mut ColorSystem) {
         color_system.set_paint(&self.window, self.settings.primary_paint);
+        let (width, height) = (self.display_settings.width, self.display_settings.height);
 
         self.window.mv(1, 0);
         self.window.addch(ACS_ULCORNER());
-        self.window.hline(ACS_HLINE(), self.display_settings.width-2);
-        self.window.mv(1, self.display_settings.width-1);
+        self.window.hline(ACS_HLINE(), width - 2);
+        self.window.mv(1, width - 1);
         self.window.addch(ACS_URCORNER());
 
-        self.window.mv(self.display_settings.height-2, 0);
+        self.window.mv(height - 2, 0);
         self.window.addch(ACS_LLCORNER());
-        self.window.hline(ACS_HLINE(), self.display_settings.width-2);
-        self.window.mv(self.display_settings.height-2, self.display_settings.width-1);
+        self.window.hline(ACS_HLINE(), width - 2);
+        self.window.mv(height - 2, width-1);
         self.window.addch(ACS_LRCORNER());
 
-        for y in 2..self.display_settings.height-2 {
+        for y in 2..height-2 {
             self.window.mv(y, 0);
             self.window.addch(ACS_VLINE());
-            self.window.mv(y, self.display_settings.width-1);
+            self.window.mv(y, width - 1);
             self.window.addch(ACS_VLINE());
         }
 
@@ -876,13 +886,13 @@ impl System {
 
     pub fn resize(&mut self) {
         self.display_settings = System::generate_display_settings(
-            &self.window, self.settings.cursor_vertical_gap, &self.settings.columns_ratio);
+            &self.window, self.settings.scrolling_gap, &self.settings.columns_ratio);
         self.right_column = self.collect_right_column_of_current();
         self.parent_siblings_shift = System::siblings_shift_for(
-                self.display_settings.cursor_vertical_gap, self.display_settings.max_entries_displayed,
+                self.display_settings.scrolling_gap, self.display_settings.column_effective_height,
                 self.parent_index, self.parent_siblings.len(), None);
         self.current_siblings_shift = System::siblings_shift_for(
-                self.display_settings.cursor_vertical_gap, self.display_settings.max_entries_displayed,
+                self.display_settings.scrolling_gap, self.display_settings.column_effective_height,
                 self.current_index, self.current_siblings.len(), None);
     }
 }
