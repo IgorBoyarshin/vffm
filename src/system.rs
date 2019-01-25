@@ -161,6 +161,7 @@ pub struct System {
     current_permissions: String,
     sorting_type: SortingType,
     spawn_patterns: Vec<SpawnPattern>, // const
+    symlink_target: Option<String>,
 }
 
 impl System {
@@ -203,6 +204,7 @@ impl System {
             parent_siblings,
             right_column,
             current_permissions: System::string_permissions_for_path(&first_entry_path),
+            symlink_target: System::get_symlink_target(&first_entry_path),
             current_path: first_entry_path,
             parent_path: starting_path,
 
@@ -210,7 +212,6 @@ impl System {
             current_siblings_shift,
 
             sorting_type,
-
             spawn_patterns: System::generate_spawn_patterns(),
         }
     }
@@ -253,7 +254,7 @@ impl System {
                 return RightColumn::with_siblings(
                     System::collect_sorted_children_of(path_opt, sorting_type));
             } else { // resolved path is a regular file
-                let path = maybe_resolve_symlink(path);
+                let path = maybe_resolve_symlink_recursively(path);
                 if let Some(preview) = System::read_preview_of(&path, max_height) {
                     let truncated_preview: Vec<String> = preview.into_iter()
                         .map(|line| System::maybe_truncate(line.trim_end(), max_width))
@@ -395,10 +396,23 @@ impl System {
         System::string_permissions_for_path(&self.current_path)
     }
 
-    fn current_entry_ref(&self) -> Option<&Entry> {
-        if self.current_path.is_some() { Some(self.unsafe_current_entry_ref()) }
-        else { None }
+    fn get_symlink_target(path: &Option<PathBuf>) -> Option<String> {
+        if let Some(path) = path {
+            if is_symlink(path) {
+                return Some(path_to_str(&resolve_symlink(path)).to_string());
+            }
+        }
+        None
     }
+
+    fn get_symlink_target_for_current(&self) -> Option<String> {
+        System::get_symlink_target(&self.current_path)
+    }
+    //
+    // fn current_entry_ref(&self) -> Option<&Entry> {
+    //     if self.current_path.is_some() { Some(self.unsafe_current_entry_ref()) }
+    //     else { None }
+    // }
 
     fn unsafe_current_entry_ref(&self) -> &Entry {
         &self.current_siblings[self.current_index]
@@ -529,6 +543,7 @@ impl System {
         self.current_permissions = self.get_current_permissions();
         self.right_column = self.collect_right_column_of_current();
         self.current_siblings_shift = self.recalculate_current_siblings_shift();
+        self.symlink_target = self.get_symlink_target_for_current();
     }
 
     fn common_left_right(&mut self) {
@@ -536,6 +551,7 @@ impl System {
         self.right_column = self.collect_right_column_of_current();
         self.current_siblings = self.collect_sorted_children_of_parent();
         self.parent_siblings = self.collect_sorted_siblings_of_parent();
+        self.symlink_target = self.get_symlink_target_for_current();
     }
 //-----------------------------------------------------------------------------
     pub fn up(&mut self) {
@@ -590,7 +606,7 @@ impl System {
             self.current_siblings_shift = 0;
         } else { // Resolved path points to a file
             // Try to open with default app
-            let path = maybe_resolve_symlink(current_path_ref);
+            let path = maybe_resolve_symlink_recursively(current_path_ref);
             if let Some((app, args, is_external)) = self.spawn_rule_for(&path) {
                 System::spawn(&app, args, is_external);
             }
@@ -617,6 +633,15 @@ impl System {
         if self.current_path.is_some() {
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
             mvprintw(&self.window, self.display_settings.height - 1, 0, &self.current_permissions);
+        }
+    }
+
+    fn draw_maybe_symlink_target(&self, cs: &mut ColorSystem) {
+        if self.symlink_target.is_some() {
+            let target = self.symlink_target.as_ref().unwrap();
+            let text = "-> ".to_string() + target;
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
+            mvprintw(&self.window, self.display_settings.height - 1, 17, &text);
         }
     }
 
@@ -721,6 +746,7 @@ impl System {
         self.draw_current_path(&mut cs);
         self.draw_current_permission(&mut cs);
         self.draw_current_size(&mut cs);
+        self.draw_maybe_symlink_target(&mut cs);
 
         self.window.refresh();
     }

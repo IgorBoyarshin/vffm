@@ -151,15 +151,22 @@ pub fn read_lines(path: &PathBuf, amount: usize, max_bytes: u64) -> Vec<String> 
 //     contents
 // }
 
-pub fn maybe_resolve_symlink(path: &PathBuf) -> PathBuf {
+pub fn resolve_symlink(path: &PathBuf) -> PathBuf {
+    path.read_link().expect("Not a symlink")
+}
+
+pub fn is_symlink(path: &PathBuf) -> bool {
     let meta = path.symlink_metadata().expect("Cannot read metadata"); // Does not resolve the symlink
-    let is_symlink = !meta.is_file() && !meta.is_dir();
-    if is_symlink {
-        let mut resolved_path = path.read_link().expect("Not a symlink");
+    (!meta.is_file() && !meta.is_dir())
+}
+
+pub fn maybe_resolve_symlink_recursively(path: &PathBuf) -> PathBuf {
+    if is_symlink(path) {
+        let mut resolved_path = resolve_symlink(path);
         if !resolved_path.is_absolute() { // if not absolute, make it one
             resolved_path = path.parent().unwrap().join(resolved_path);
         }
-        maybe_resolve_symlink(&resolved_path)
+        maybe_resolve_symlink_recursively(&resolved_path)
     }
     else { path.clone() }
 }
