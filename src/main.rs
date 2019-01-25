@@ -46,6 +46,7 @@ fn main() {
     let mut system = System::new(
         Settings {
             columns_ratio: vec![2,3,3],
+            primary_paint: Paint{fg: Color::White, bg: Color::Default, bold: false, underlined: false},
             dir_paint: Paint {fg: Color::Cyan, bg: Color::Default, bold: true, underlined: false},
             symlink_paint: Paint {fg: Color::Yellow, bg: Color::Default, bold: true, underlined: false},
             file_paint: Paint {fg: Color::White, bg: Color::Default, bold: false, underlined: false},
@@ -74,7 +75,8 @@ fn main() {
             system.draw_available_matches(&mut color_system, &found_matches, current_input.len());
         }
 
-        if let Some(Input::Character(c)) = system.get() {
+        let input = system.get();
+        if let Some(Input::Character(c)) = input {
             if current_mode == Mode::AwaitingCommand {
                 current_input.push(c);
                 found_matches = combinations_that_start_with(&current_input, found_matches);
@@ -97,6 +99,8 @@ fn main() {
                     found_matches = vec_of_refs(&possible_inputs);
                 }
             } else if current_mode == Mode::Input {}
+        } else if let Some(Input::KeyResize) = input {
+            system.resize();
         }
 
         thread::sleep_ms(10);
