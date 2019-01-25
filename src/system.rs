@@ -243,11 +243,12 @@ impl System {
     fn collect_right_column(path_opt: &Option<PathBuf>, sorting_type: &SortingType,
             max_height: usize) -> RightColumn {
         if let Some(path) = path_opt {
-            if System::is_dir_or_symlink(path) {
+            if path.is_dir() { // resolved path
                 return RightColumn::with_siblings(
                     System::collect_sorted_children_of(path_opt, sorting_type));
-            } else { // not a dir
-                if let Some(preview) = System::read_preview_of(path, max_height) {
+            } else { // resolved path is a regular file
+                let path = maybe_resolve_symlink(path);
+                if let Some(preview) = System::read_preview_of(&path, max_height) {
                     return RightColumn::with_preview(preview);
                 }
             }
@@ -316,7 +317,9 @@ impl System {
         patterns
     }
 
-    fn spawn_rule_for(&self, file_name: &str, full_path: &str) -> Option<(String, Vec<String>, bool)> {
+    fn spawn_rule_for(&self, full_path: &PathBuf) -> Option<(String, Vec<String>, bool)> {
+        let file_name = full_path.file_name().unwrap().to_str().unwrap();
+        let full_path = full_path.to_str().unwrap();
         for SpawnPattern { file, rule } in self.spawn_patterns.iter() {
             match file {
                 SpawnFile::Extension(ext) => if file_name.to_ascii_lowercase()
@@ -561,27 +564,26 @@ impl System {
     }
 
     pub fn right(&mut self) {
-        if let Some(current_entry) = self.current_entry_ref() {
-            let current_path_ref = self.current_path.as_ref().unwrap();
-            if current_entry.is_dir() || current_entry.is_symlink() {
-                // Navigate inside
-                self.parent_path = current_path_ref.to_path_buf();
-                self.current_path = System::path_of_nth_entry_inside(
-                    0, current_path_ref, self.right_column.siblings_ref().unwrap());
+        if self.inside_empty_dir() { return; }
+        let current_path_ref = self.current_path.as_ref().unwrap();
+        if current_path_ref.is_dir() { // Traverses symlinks. The resolved path points to a dir
+            // Navigate inside
+            // Deliberately use the not-resolved version, so the path contains the symlink
+            self.parent_path = current_path_ref.to_path_buf();
+            self.current_path = System::path_of_nth_entry_inside(
+                0, current_path_ref, self.right_column.siblings_ref().unwrap());
 
-                self.common_left_right();
+            self.common_left_right();
 
-                self.parent_index = self.current_index;
-                self.current_index = 0;
-                self.parent_siblings_shift = self.current_siblings_shift;
-                self.current_siblings_shift = 0;
-            } else if current_entry.is_regular() {
-                // Try to open with default app
-                let file_name = current_entry.name.as_str();
-                let full_path = current_path_ref.to_str().unwrap();
-                if let Some((app, args, is_external)) = self.spawn_rule_for(file_name, full_path) {
-                    System::spawn(&app, args, is_external);
-                }
+            self.parent_index = self.current_index;
+            self.current_index = 0;
+            self.parent_siblings_shift = self.current_siblings_shift;
+            self.current_siblings_shift = 0;
+        } else { // Resolved path points to a file
+            // Try to open with default app
+            let path = maybe_resolve_symlink(current_path_ref);
+            if let Some((app, args, is_external)) = self.spawn_rule_for(&path) {
+                System::spawn(&app, args, is_external);
             }
         }
     }
