@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::collections::HashMap;
 use std::ops::RangeBounds;
+use std::ffi::OsStr;
 
 use crate::coloring::*;
 use crate::filesystem::*;
@@ -21,6 +22,10 @@ fn printw(window: &Window, string: &str) -> i32 {
 fn mvprintw(window: &Window, y: i32, x: i32, string: &str) -> i32 {
     window.mv(y, x);
     printw(window, string)
+}
+//-----------------------------------------------------------------------------
+fn path_to_str(path: &PathBuf) -> &str {
+    path.to_str().unwrap()
 }
 //-----------------------------------------------------------------------------
 #[derive(Clone)]
@@ -167,7 +172,7 @@ impl System {
         let current_siblings = collect_maybe_dir(&starting_path);
         let parent_siblings = collect_siblings_of(&starting_path);
         let first_entry_path =
-            System::path_of_first_entry_inside(&starting_path, &current_siblings);
+            System::path_of_nth_entry_inside(0, &starting_path, &current_siblings);
         let parent_index = index_inside(&starting_path);
         let current_index = 0;
 
@@ -326,7 +331,7 @@ impl System {
         None
     }
 
-    fn spawn(app: &str, args: Vec<String>, external: bool) {
+    fn spawn<S: AsRef<OsStr>>(app: &str, args: Vec<S>, external: bool) {
         if external {
             Command::new(app).args(args)
                 .stderr(Stdio::null())
@@ -335,6 +340,23 @@ impl System {
         } else {
             Command::new(app).args(args)
                 .status().expect("failed to execute process");
+        }
+    }
+//-----------------------------------------------------------------------------
+    fn remove(path: &PathBuf) {
+        if path.is_dir() {
+            // TODO
+        } else if path.is_file() {
+            System::spawn("rm", vec!["-f", path_to_str(path)], false);
+        } else { // is symlink
+            // TODO
+        }
+    }
+
+    pub fn remove_selected(&mut self) {
+        if self.current_path.is_some() {
+            System::remove(self.current_path.as_ref().unwrap());
+            self.update_current();
         }
     }
 //-----------------------------------------------------------------------------
@@ -379,9 +401,10 @@ impl System {
         self.current_path.is_none()
     }
 
-    fn path_of_first_entry_inside(path: &PathBuf, entries: &Vec<Entry>) -> Option<PathBuf> {
+    fn path_of_nth_entry_inside(n: usize, path: &PathBuf, entries: &Vec<Entry>) -> Option<PathBuf> {
         if entries.is_empty() { return None; }
-        let name = entries[0].name.clone();
+        if n >= entries.len() { return None; }
+        let name = entries[n].name.clone();
         let mut path = path.clone();
         path.push(name);
         Some(path)
@@ -396,6 +419,31 @@ impl System {
     fn is_dir_or_symlink(path: &PathBuf) -> bool {
         !path.is_file()
     }
+//-----------------------------------------------------------------------------
+    // Update all, affectively reloading everything
+    // fn update(&self) {
+    //
+    // }
+
+    // Update central column and right column
+    fn update_current(&mut self) {
+        self.current_siblings = self.collect_sorted_children_of_parent();
+        let len = self.current_siblings.len();
+        self.current_index =
+            if self.current_siblings.is_empty() { 0 } // reset for future
+            else if self.current_index >= len   { len - 1 } // update to valid
+            else                                { self.current_index }; // leave old
+        self.current_path = System::path_of_nth_entry_inside(
+            self.current_index, &self.parent_path, &self.current_siblings);
+        self.right_column = self.collect_right_column_of_current();
+        self.current_permissions = self.get_current_permissions();
+        self.current_siblings_shift = self.recalculate_current_siblings_shift();
+    }
+
+    // Update current entry and right column
+    // fn update_current_entry(&self) {
+    //
+    // }
 //-----------------------------------------------------------------------------
     fn update_last_part_of_current_path_by_index(&mut self) {
         let name = self.unsafe_current_entry_ref().name.clone();
@@ -518,8 +566,8 @@ impl System {
             if current_entry.is_dir() || current_entry.is_symlink() {
                 // Navigate inside
                 self.parent_path = current_path_ref.to_path_buf();
-                self.current_path = System::path_of_first_entry_inside(
-                    current_path_ref, self.right_column.siblings_ref().unwrap());
+                self.current_path = System::path_of_nth_entry_inside(
+                    0, current_path_ref, self.right_column.siblings_ref().unwrap());
 
                 self.common_left_right();
 

@@ -14,6 +14,7 @@ pub enum Command {
     Left,
     Right,
     Sort(SortingType),
+    Remove,
     // NewTab,
     // CloseTab,
     // NextTab,
@@ -37,6 +38,7 @@ pub fn generate_possible_inputs() -> Vec<(Combination, Command)> {
     inputs.push(("st".to_string(), Command::Sort(SortingType::TimeModified)));
     inputs.push(("sa".to_string(), Command::Sort(SortingType::Any)));
     inputs.push(("gh".to_string(), Command::GoTo("/home/igorek/")));
+    inputs.push(("dd".to_string(), Command::Remove));
     inputs
 }
 
@@ -49,6 +51,7 @@ pub fn description_of(command: &Command) -> String {
         Command::Left => "Navigate to the parent directory".to_string(),
         Command::Right => "Navigate into the child directory or file".to_string(),
         Command::Sort(sorting_type) => format!("Sort entries {:?}", sorting_type),
+        Command::Remove => "Remove selected entry(ies) from the filesystem".to_string(),
     }
 }
 

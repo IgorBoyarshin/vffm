@@ -261,10 +261,10 @@ pub fn index_inside(path: &PathBuf) -> usize {
 //     std::env::current_exe().expect("Cannot get absolute path")
 //         .to_str().unwrap().to_string()
 // }
-//
-// pub fn absolute_pathbuf() -> PathBuf {
-//     std::env::current_exe().expect("Cannot get absolute PathBuf")
-// }
+
+pub fn absolute_pathbuf() -> PathBuf {
+    std::env::current_exe().expect("Cannot get absolute PathBuf")
+}
 
 pub fn is_root(path: &PathBuf) -> bool {
     path.parent() == None
