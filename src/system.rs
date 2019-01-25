@@ -340,7 +340,7 @@ impl System {
         }
     }
 //-----------------------------------------------------------------------------
-    pub fn change_sorting_type(&mut self, new_sorting_type: SortingType) {
+    pub fn sort_with(&mut self, new_sorting_type: SortingType) {
         self.sorting_type = new_sorting_type;
     }
 
@@ -542,26 +542,23 @@ impl System {
 //-----------------------------------------------------------------------------
     fn draw_current_size(&self, cs: &mut ColorSystem) {
         if self.current_path.is_some() {
-            cs.set_paint(&self.window, Paint{fg: Color::Blue, bg: Color::Default,
-                                                bold: false, underlined: false});
-            mvprintw(&self.window, self.display_settings.height - 1, 12,
-                         &System::human_size(self.unsafe_current_entry_ref().size));
+            let size = System::human_size(self.unsafe_current_entry_ref().size);
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Blue, Color::Default));
+            mvprintw(&self.window, self.display_settings.height - 1, 12, &size);
         }
     }
 
     fn draw_current_path(&self, cs: &mut ColorSystem) {
         if !self.inside_empty_dir() {
-            cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Default,
-                                                bold: false, underlined: false});
-            mvprintw(&self.window, 0, 0,
-                         self.current_path.as_ref().unwrap().to_str().unwrap());
+            let path = self.current_path.as_ref().unwrap().to_str().unwrap();
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
+            mvprintw(&self.window, 0, 0, path);
         }
     }
 
     fn draw_current_permission(&self, cs: &mut ColorSystem) {
         if self.current_path.is_some() {
-            cs.set_paint(&self.window, Paint{fg: Color::LightBlue, bg: Color::Default,
-                                                bold: false, underlined: false});
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
             mvprintw(&self.window, self.display_settings.height - 1, 0, &self.current_permissions);
         }
     }
@@ -678,8 +675,7 @@ impl System {
         if matches.is_empty() { return; }
 
         // Borders
-        cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
-                                            bold: false, underlined: false});
+        cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
         let y = self.display_settings.height - 2 - matches.len() as i32 - 1;
         self.window.mv(y, 0);
         self.window.hline(ACS_HLINE(), self.display_settings.width);
@@ -692,20 +688,16 @@ impl System {
 
             // Combination
             let (completed_part, uncompleted_part) = combination.split_at(completion_count);
-            cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
-                                                bold: true, underlined: false});
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default).bold());
             mvprintw(&self.window, y, 0, &completed_part);
-            cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
-                                                bold: false, underlined: false});
-            printw(&self.window, &uncompleted_part);
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
+            printw(  &self.window,       &uncompleted_part);
 
             // Space till description
             let left = max_len - combination.len() as i32;
             self.window.hline(' ', left);
 
             // Command description
-            cs.set_paint(&self.window, Paint{fg: Color::Green, bg: Color::Black,
-                                                bold: false, underlined: false});
             let description = description_of(&command);
             mvprintw(&self.window, y, max_len as i32, &description);
 
@@ -716,7 +708,7 @@ impl System {
     }
 
     fn draw_empty_sign(&self, cs: &mut ColorSystem, column_index: usize) {
-        cs.set_paint(&self.window, Paint{fg: Color::Black, bg: Color::Red, bold: true, underlined: false});
+        cs.set_paint(&self.window, Paint::with_fg_bg(Color::Black, Color::Red).bold());
         let (begin, _) = self.display_settings.columns_coord[column_index];
         mvprintw(&self.window, self.display_settings.entries_display_begin, begin + 1, "empty");
     }

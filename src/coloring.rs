@@ -41,7 +41,7 @@ pub struct Paint {
 }
 
 impl Paint {
-    pub fn new(fg: Color, bg: Color) -> Paint {
+    pub fn with_fg_bg(fg: Color, bg: Color) -> Paint {
         Paint {
             fg,
             bg,
@@ -50,13 +50,14 @@ impl Paint {
         }
     }
 
-    pub fn new_full(fg: Color, bg: Color, bold: bool, underlined: bool) -> Paint {
-        Paint {
-            fg,
-            bg,
-            bold,
-            underlined,
-        }
+    pub fn bold(mut self) -> Self {
+        self.bold = true;
+        self
+    }
+
+    pub fn underlined(mut self) -> Self {
+        self.underlined = true;
+        self
     }
 }
 

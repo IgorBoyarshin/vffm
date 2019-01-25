@@ -46,12 +46,12 @@ fn main() {
     let mut system = System::new(
         Settings {
             columns_ratio: vec![2,3,3],
-            primary_paint: Paint{fg: Color::White, bg: Color::Default, bold: false, underlined: false},
-            dir_paint: Paint {fg: Color::Cyan, bg: Color::Default, bold: true, underlined: false},
-            symlink_paint: Paint {fg: Color::Yellow, bg: Color::Default, bold: true, underlined: false},
-            file_paint: Paint {fg: Color::White, bg: Color::Default, bold: false, underlined: false},
-            unknown_paint: Paint {fg: Color::Grey, bg: Color::White, bold: true, underlined: false},
-            preview_paint: Paint {fg: Color::Green, bg: Color::Default, bold: false, underlined: false},
+            primary_paint: Paint::with_fg_bg(Color::White,  Color::Default),
+            dir_paint:     Paint::with_fg_bg(Color::Cyan,   Color::Default).bold(),
+            symlink_paint: Paint::with_fg_bg(Color::Yellow, Color::Default).bold(),
+            file_paint:    Paint::with_fg_bg(Color::White,  Color::Default),
+            unknown_paint: Paint::with_fg_bg(Color::Grey,   Color::White)  .bold(),
+            preview_paint: Paint::with_fg_bg(Color::Green,  Color::Default),
             scrolling_gap: 4,
         },
         starting_path,
@@ -83,13 +83,13 @@ fn main() {
                 if exact_match(&found_matches, &current_input) {
                     let (_, command) = found_matches.pop().unwrap();
                     match command {
-                        Command::Terminate => terminated = true,
-                        Command::Up(n) => for _ in 0..*n {system.up()},
-                        Command::Down(n) => for _ in 0..*n {system.down()},
-                        Command::Left => system.left(),
-                        Command::Right => system.right(),
-                        Command::Sort(sorting_type) => system.change_sorting_type(*sorting_type),
-                        Command::GoTo(_path) => {},
+                        Command::Terminate          => terminated = true,
+                        Command::Up(n)              => for _ in 0..*n {system.up()},
+                        Command::Down(n)            => for _ in 0..*n {system.down()},
+                        Command::Left               => system.left(),
+                        Command::Right              => system.right(),
+                        Command::Sort(sorting_type) => system.sort_with(*sorting_type),
+                        Command::GoTo(_path)        => {},
                     }
                 }
 
