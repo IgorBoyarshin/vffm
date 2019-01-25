@@ -68,7 +68,7 @@ fn main() {
         system.clear(&mut color_system);
         system.draw(&mut color_system);
         if current_input.len() > 0 && found_matches.len() >= 1 {
-            // If the user is trying some input and there matches
+            // If the user is trying some input and there are matches
             system.draw_available_matches(&mut color_system, &found_matches, current_input.len());
         }
 
