@@ -160,11 +160,13 @@ pub struct System {
     symlink_target: Option<String>,
 
     yanked_path: Option<PathBuf>,
+    drawing_delay: i32,
 }
 
 impl System {
     pub fn new(settings: Settings, starting_path: PathBuf) -> Self {
-        let window = System::setup();
+        let drawing_delay = 20;
+        let window = System::setup(drawing_delay);
 
         let sorting_type = SortingType::Any;
 
@@ -212,6 +214,7 @@ impl System {
             sorting_type,
             spawn_patterns: System::generate_spawn_patterns(),
             yanked_path: None,
+            drawing_delay,
         }
     }
 //-----------------------------------------------------------------------------
@@ -987,10 +990,11 @@ impl System {
         string.chars().count()
     }
 //-----------------------------------------------------------------------------
-    fn setup() -> Window {
+    fn setup(drawing_delay: i32) -> Window {
         let window = initscr();
         window.refresh();
         window.keypad(true);
+        half_delay(drawing_delay);
         start_color();
         use_default_colors();
         noecho();
