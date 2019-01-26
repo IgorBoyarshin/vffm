@@ -86,7 +86,7 @@ fn main() {
                         Command::Left               => system.left(),
                         Command::Right              => system.right(),
                         Command::Sort(sorting_type) => system.sort_with(*sorting_type),
-                        Command::GoTo(_path)        => {},
+                        Command::GoTo(path)         => system.goto(path),
                         Command::Remove             => system.remove_selected(),
                         Command::Update             => system.update_current(),
                         Command::Yank               => system.yank_selected(),

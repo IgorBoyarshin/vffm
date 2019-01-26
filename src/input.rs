@@ -41,6 +41,13 @@ pub fn generate_possible_inputs() -> Vec<(Combination, Command)> {
     inputs.push(("st".to_string(), Command::Sort(SortingType::TimeModified)));
     inputs.push(("sa".to_string(), Command::Sort(SortingType::Any)));
     inputs.push(("gh".to_string(), Command::GoTo("/home/igorek/")));
+    inputs.push(("gd".to_string(), Command::GoTo("/home/igorek/Downloads")));
+    inputs.push(("gs".to_string(), Command::GoTo("/home/igorek/Studying")));
+    inputs.push(("gS".to_string(), Command::GoTo("/home/igorek/Storage")));
+    inputs.push(("gT".to_string(), Command::GoTo("/home/igorek/Storage/torrents")));
+    inputs.push(("gc".to_string(), Command::GoTo("/home/igorek/screenshots")));
+    inputs.push(("gt".to_string(), Command::GoTo("/home/igorek/Stuff")));
+    inputs.push(("gm".to_string(), Command::GoTo("/home/igorek/Mutual")));
     inputs.push(("dd".to_string(), Command::Remove));
     inputs.push(("yy".to_string(), Command::Yank));
     inputs.push(("pp".to_string(), Command::Paste));

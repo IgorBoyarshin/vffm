@@ -137,11 +137,7 @@ struct DisplaySettings {
     entries_display_begin: i32, // const
 }
 
-pub struct System {
-    window: Window,
-    settings: Settings,
-    display_settings: DisplaySettings,
-
+struct Context {
     current_siblings: Vec<Entry>,
     parent_siblings: Vec<Entry>,
     right_column: RightColumn, // depends on display_settings
@@ -156,12 +152,21 @@ pub struct System {
     current_siblings_shift: usize, // depends on display_settings
 
     current_permissions: String,
+    symlink_target: Option<String>,
+}
+
+pub struct System {
+    window: Window,
+    settings: Settings,
+    display_settings: DisplaySettings,
+
+    context: Context,
+
     sorting_type: SortingType,
     spawn_patterns: Vec<SpawnPattern>, // const
-    symlink_target: Option<String>,
 
     yanked_path: Option<PathBuf>,
-    drawing_delay: i32,
+    drawing_delay: i32, // pseudo-const
     process_handle: Option<Output>,
 }
 
@@ -172,16 +177,34 @@ impl System {
 
         let sorting_type = SortingType::Any;
 
+        let display_settings = System::generate_display_settings(
+            &window, settings.scrolling_gap, &settings.columns_ratio);
+
+        let context = System::generate_context(starting_path, &display_settings, &sorting_type);
+
+        System {
+            window,
+            settings,
+            display_settings,
+
+            context,
+
+            sorting_type,
+            spawn_patterns: System::generate_spawn_patterns(),
+            yanked_path: None,
+            drawing_delay,
+            process_handle: None,
+        }
+    }
+//-----------------------------------------------------------------------------
+    fn generate_context(starting_path: PathBuf, display_settings: &DisplaySettings,
+            sorting_type: &SortingType) -> Context {
         let current_siblings = collect_maybe_dir(&starting_path);
         let parent_siblings = collect_siblings_of(&starting_path);
         let first_entry_path =
             System::path_of_nth_entry_inside(0, &starting_path, &current_siblings);
         let parent_index = index_inside(&starting_path);
         let current_index = 0;
-
-        let display_settings = System::generate_display_settings(
-            &window, settings.scrolling_gap, &settings.columns_ratio);
-
         let column_index = 2;
         let (begin, end) = display_settings.columns_coord[column_index];
         let column_width = (end - begin) as usize;
@@ -194,12 +217,7 @@ impl System {
         let current_siblings_shift = System::siblings_shift_for(
                 display_settings.scrolling_gap, display_settings.column_effective_height,
                 current_index, current_siblings.len(), None);
-
-        System {
-            window,
-            settings,
-            display_settings,
-
+        Context {
             parent_index,
             current_index,
             current_siblings,
@@ -212,15 +230,9 @@ impl System {
 
             parent_siblings_shift,
             current_siblings_shift,
-
-            sorting_type,
-            spawn_patterns: System::generate_spawn_patterns(),
-            yanked_path: None,
-            drawing_delay,
-            process_handle: None,
         }
     }
-//-----------------------------------------------------------------------------
+
     fn generate_display_settings(
             window: &Window, scrolling_gap: usize, columns_ratio: &Vec<u32>)
             -> DisplaySettings {
@@ -248,7 +260,7 @@ impl System {
         let column_index = 2;
         let (begin, end) = self.display_settings.columns_coord[column_index];
         let column_width = (end - begin) as usize;
-        System::collect_right_column(&self.current_path, &self.sorting_type,
+        System::collect_right_column(&self.context.current_path, &self.sorting_type,
                                      self.display_settings.column_effective_height, column_width)
     }
 
@@ -380,7 +392,7 @@ impl System {
     }
 //-----------------------------------------------------------------------------
     fn current_contains(&self, name: &str) -> bool {
-        for entry in self.current_siblings.iter() {
+        for entry in self.context.current_siblings.iter() {
             if entry.name == name { return true; }
         }
         false
@@ -402,7 +414,7 @@ impl System {
 
             let mut target_name = file_name(yanked_ref);
             while self.current_contains(&target_name) { target_name += "_"; }
-            let dst = path_to_string(&self.parent_path.join(target_name));
+            let dst = path_to_string(&self.context.parent_path.join(target_name));
 
             self.copy(&src, &dst);
             self.yanked_path = None;
@@ -411,8 +423,8 @@ impl System {
     }
 
     pub fn yank_selected(&mut self) {
-        if self.current_path.is_some() {
-            self.yanked_path = Some(self.current_path.as_ref().unwrap().clone());
+        if self.context.current_path.is_some() {
+            self.yanked_path = Some(self.context.current_path.as_ref().unwrap().clone());
         }
     }
 
@@ -427,8 +439,8 @@ impl System {
     }
 
     pub fn remove_selected(&mut self) {
-        if self.current_path.is_some() {
-            System::remove(self.current_path.as_ref().unwrap());
+        if self.context.current_path.is_some() {
+            System::remove(self.context.current_path.as_ref().unwrap());
             self.update_current();
         }
     }
@@ -454,7 +466,7 @@ impl System {
     }
 
     fn get_current_permissions(&mut self) -> String {
-        System::string_permissions_for_path(&self.current_path)
+        System::string_permissions_for_path(&self.context.current_path)
     }
 
     fn get_symlink_target(path: &Option<PathBuf>) -> Option<String> {
@@ -469,7 +481,7 @@ impl System {
     }
 
     fn get_symlink_target_for_current(&self) -> Option<String> {
-        System::get_symlink_target(&self.current_path)
+        System::get_symlink_target(&self.context.current_path)
     }
 
     // fn current_entry_ref(&self) -> Option<&Entry> {
@@ -478,7 +490,7 @@ impl System {
     // }
 
     fn unsafe_current_entry_ref(&self) -> &Entry {
-        &self.current_siblings[self.current_index]
+        &self.context.current_siblings[self.context.current_index]
     }
 
     // fn current_is_dir(&self) -> bool {
@@ -487,7 +499,7 @@ impl System {
     // }
 
     fn inside_empty_dir(&self) -> bool {
-        self.current_path.is_none()
+        self.context.current_path.is_none()
     }
 
     fn path_of_nth_entry_inside(n: usize, path: &PathBuf, entries: &Vec<Entry>) -> Option<PathBuf> {
@@ -510,23 +522,23 @@ impl System {
     }
 //-----------------------------------------------------------------------------
     // Update all, affectively reloading everything
-    // fn update(&self) {
-    //
-    // }
+    fn update(&self) {
+
+    }
 
     // Update central column and right column
     pub fn update_current(&mut self) {
-        self.current_siblings = self.collect_sorted_children_of_parent();
-        let len = self.current_siblings.len();
-        self.current_index =
-            if self.current_siblings.is_empty() { 0 } // reset for future
-            else if self.current_index >= len   { len - 1 } // update to valid
-            else                                { self.current_index }; // leave old
-        self.current_path = System::path_of_nth_entry_inside(
-            self.current_index, &self.parent_path, &self.current_siblings);
-        self.right_column = self.collect_right_column_of_current();
-        self.current_permissions = self.get_current_permissions();
-        self.current_siblings_shift = self.recalculate_current_siblings_shift();
+        self.context.current_siblings = self.collect_sorted_children_of_parent();
+        let len = self.context.current_siblings.len();
+        self.context.current_index =
+            if self.context.current_siblings.is_empty() { 0 } // reset for future
+            else if self.context.current_index >= len   { len - 1 } // update to valid
+            else                                { self.context.current_index }; // leave old
+        self.context.current_path = System::path_of_nth_entry_inside(
+            self.context.current_index, &self.context.parent_path, &self.context.current_siblings);
+        self.context.right_column = self.collect_right_column_of_current();
+        self.context.current_permissions = self.get_current_permissions();
+        self.context.current_siblings_shift = self.recalculate_current_siblings_shift();
     }
 
     // Update current entry and right column
@@ -536,13 +548,13 @@ impl System {
 //-----------------------------------------------------------------------------
     fn update_last_part_of_current_path_by_index(&mut self) {
         let name = self.unsafe_current_entry_ref().name.clone();
-        self.current_path.as_mut().map(|path| {
+        self.context.current_path.as_mut().map(|path| {
             (*path).set_file_name(name); // try_pop and then push(name)
         });
     }
 
     fn collect_sorted_siblings_of_parent(&self) -> Vec<Entry> {
-        System::sort(collect_siblings_of(&self.parent_path), &self.sorting_type)
+        System::sort(collect_siblings_of(&self.context.parent_path), &self.sorting_type)
     }
 
     // TODO: mb get rid of Option
@@ -557,7 +569,7 @@ impl System {
     // }
 
     fn collect_sorted_children_of_parent(&self) -> Vec<Entry> {
-        System::sort(collect_maybe_dir(&self.parent_path), &self.sorting_type)
+        System::sort(collect_maybe_dir(&self.context.parent_path), &self.sorting_type)
     }
 
     // The display is guaranteed to be able to contain 2*gap (accomplished in settings)
@@ -592,81 +604,81 @@ impl System {
     fn recalculate_parent_siblings_shift(&mut self) -> usize {
         System::siblings_shift_for(
             self.display_settings.scrolling_gap, self.display_settings.column_effective_height,
-            self.parent_index, self.parent_siblings.len(), None)
+            self.context.parent_index, self.context.parent_siblings.len(), None)
     }
 
     fn recalculate_current_siblings_shift(&mut self) -> usize {
         System::siblings_shift_for(
             self.display_settings.scrolling_gap, self.display_settings.column_effective_height,
-            self.current_index, self.current_siblings.len(), Some(self.current_siblings_shift))
+            self.context.current_index, self.context.current_siblings.len(), Some(self.context.current_siblings_shift))
     }
 
     fn common_up_down(&mut self) {
         self.update_last_part_of_current_path_by_index();
-        self.current_permissions = self.get_current_permissions();
-        self.right_column = self.collect_right_column_of_current();
-        self.current_siblings_shift = self.recalculate_current_siblings_shift();
-        self.symlink_target = self.get_symlink_target_for_current();
+        self.context.current_permissions = self.get_current_permissions();
+        self.context.right_column = self.collect_right_column_of_current();
+        self.context.current_siblings_shift = self.recalculate_current_siblings_shift();
+        self.context.symlink_target = self.get_symlink_target_for_current();
     }
 
     fn common_left_right(&mut self) {
-        self.current_permissions = self.get_current_permissions();
-        self.right_column = self.collect_right_column_of_current();
-        self.current_siblings = self.collect_sorted_children_of_parent();
-        self.parent_siblings = self.collect_sorted_siblings_of_parent();
-        self.symlink_target = self.get_symlink_target_for_current();
+        self.context.current_permissions = self.get_current_permissions();
+        self.context.right_column = self.collect_right_column_of_current();
+        self.context.current_siblings = self.collect_sorted_children_of_parent();
+        self.context.parent_siblings = self.collect_sorted_siblings_of_parent();
+        self.context.symlink_target = self.get_symlink_target_for_current();
     }
 //-----------------------------------------------------------------------------
     pub fn up(&mut self) {
         if self.inside_empty_dir() { return }
-        if self.current_index > 0 {
-            self.current_index -= 1;
+        if self.context.current_index > 0 {
+            self.context.current_index -= 1;
             self.common_up_down();
         }
     }
 
     pub fn down(&mut self) {
         if self.inside_empty_dir() { return }
-        if self.current_index < self.current_siblings.len() - 1 {
-            self.current_index += 1;
+        if self.context.current_index < self.context.current_siblings.len() - 1 {
+            self.context.current_index += 1;
             self.common_up_down();
         }
     }
 
     pub fn left(&mut self) {
-        if !is_root(&self.parent_path) {
-            if self.current_path.is_none() {
-                self.current_path = Some(self.parent_path.clone());
+        if !is_root(&self.context.parent_path) {
+            if self.context.current_path.is_none() {
+                self.context.current_path = Some(self.context.parent_path.clone());
             } else {
-                self.current_path.as_mut().map(|path| path.pop());
+                self.context.current_path.as_mut().map(|path| path.pop());
             }
-            self.parent_path.pop();
+            self.context.parent_path.pop();
 
             self.common_left_right();
 
-            self.current_index = self.parent_index;
-            self.parent_index = index_inside(&self.parent_path);
-            self.current_siblings_shift = self.parent_siblings_shift;
-            self.parent_siblings_shift = self.recalculate_parent_siblings_shift();
+            self.context.current_index = self.context.parent_index;
+            self.context.parent_index = index_inside(&self.context.parent_path);
+            self.context.current_siblings_shift = self.context.parent_siblings_shift;
+            self.context.parent_siblings_shift = self.recalculate_parent_siblings_shift();
         }
     }
 
     pub fn right(&mut self) {
         if self.inside_empty_dir() { return; }
-        let current_path_ref = self.current_path.as_ref().unwrap();
+        let current_path_ref = self.context.current_path.as_ref().unwrap();
         if current_path_ref.is_dir() { // Traverses symlinks. The resolved path points to a dir
             // Navigate inside
             // Deliberately use the not-resolved version, so the path contains the symlink
-            self.parent_path = current_path_ref.to_path_buf();
-            self.current_path = System::path_of_nth_entry_inside(
-                0, current_path_ref, self.right_column.siblings_ref().unwrap());
+            self.context.parent_path = current_path_ref.to_path_buf();
+            self.context.current_path = System::path_of_nth_entry_inside(
+                0, current_path_ref, self.context.right_column.siblings_ref().unwrap());
 
             self.common_left_right();
 
-            self.parent_index = self.current_index;
-            self.current_index = 0;
-            self.parent_siblings_shift = self.current_siblings_shift;
-            self.current_siblings_shift = 0;
+            self.context.parent_index = self.context.current_index;
+            self.context.current_index = 0;
+            self.context.parent_siblings_shift = self.context.current_siblings_shift;
+            self.context.current_siblings_shift = 0;
         } else { // Resolved path points to a file
             // Try to open with default app
             let path = maybe_resolve_symlink_recursively(current_path_ref);
@@ -676,9 +688,13 @@ impl System {
             }
         }
     }
+
+    pub fn goto(&self, path: &str) {
+
+    }
 //-----------------------------------------------------------------------------
     fn draw_current_size(&self, cs: &mut ColorSystem) {
-        if self.current_path.is_some() {
+        if self.context.current_path.is_some() {
             let size = System::human_size(self.unsafe_current_entry_ref().size);
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::Blue, Color::Default));
             mvprintw(&self.window, self.display_settings.height - 1, 12, &size);
@@ -687,22 +703,22 @@ impl System {
 
     fn draw_current_path(&self, cs: &mut ColorSystem) {
         if !self.inside_empty_dir() {
-            let path = self.current_path.as_ref().unwrap().to_str().unwrap();
+            let path = self.context.current_path.as_ref().unwrap().to_str().unwrap();
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
             mvprintw(&self.window, 0, 0, path);
         }
     }
 
     fn draw_current_permission(&self, cs: &mut ColorSystem) {
-        if self.current_path.is_some() {
+        if self.context.current_path.is_some() {
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
-            mvprintw(&self.window, self.display_settings.height - 1, 0, &self.current_permissions);
+            mvprintw(&self.window, self.display_settings.height - 1, 0, &self.context.current_permissions);
         }
     }
 
     fn draw_maybe_symlink_target(&self, cs: &mut ColorSystem) {
-        if self.symlink_target.is_some() {
-            let target = self.symlink_target.as_ref().unwrap();
+        if self.context.symlink_target.is_some() {
+            let target = self.context.symlink_target.as_ref().unwrap();
             let text = "-> ".to_string() + target;
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
             mvprintw(&self.window, self.display_settings.height - 1, 17, &text);
@@ -711,8 +727,8 @@ impl System {
 
     fn draw_left_column(&self, mut cs: &mut ColorSystem) {
         let column_index = 0;
-        self.list_entries(&mut cs, column_index, &self.parent_siblings,
-              Some(self.parent_index), self.parent_siblings_shift);
+        self.list_entries(&mut cs, column_index, &self.context.parent_siblings,
+              Some(self.context.parent_index), self.context.parent_siblings_shift);
     }
 
     fn draw_middle_column(&self, mut cs: &mut ColorSystem) {
@@ -720,21 +736,21 @@ impl System {
         if self.inside_empty_dir() {
             self.draw_empty_sign(&mut cs, column_index);
         } else {
-            self.list_entries(&mut cs, column_index, &self.current_siblings,
-              Some(self.current_index), self.current_siblings_shift);
+            self.list_entries(&mut cs, column_index, &self.context.current_siblings,
+              Some(self.context.current_index), self.context.current_siblings_shift);
         }
     }
 
     fn draw_right_column(&self, mut cs: &mut ColorSystem) {
         let column_index = 2;
-        if let Some(siblings) = self.right_column.siblings_ref() {
+        if let Some(siblings) = self.context.right_column.siblings_ref() {
             // Have siblings (Some or None) => are sure to be in a dir or symlink
             if siblings.is_empty() {
                 self.draw_empty_sign(&mut cs, column_index);
             } else {
                 self.list_entries(&mut cs, column_index, siblings, None, 0);
             }
-        } else if let Some(preview) = self.right_column.preview_ref() {
+        } else if let Some(preview) = self.context.right_column.preview_ref() {
             let (begin, _) = self.display_settings.columns_coord[column_index];
             let y = self.display_settings.entries_display_begin;
             cs.set_paint(&self.window, self.settings.preview_paint);
@@ -1030,13 +1046,13 @@ impl System {
     pub fn resize(&mut self) {
         self.display_settings = System::generate_display_settings(
             &self.window, self.settings.scrolling_gap, &self.settings.columns_ratio);
-        self.right_column = self.collect_right_column_of_current();
-        self.parent_siblings_shift = System::siblings_shift_for(
+        self.context.right_column = self.collect_right_column_of_current();
+        self.context.parent_siblings_shift = System::siblings_shift_for(
             self.display_settings.scrolling_gap, self.display_settings.column_effective_height,
-            self.parent_index, self.parent_siblings.len(), None);
-        self.current_siblings_shift = System::siblings_shift_for(
+            self.context.parent_index, self.context.parent_siblings.len(), None);
+        self.context.current_siblings_shift = System::siblings_shift_for(
             self.display_settings.scrolling_gap, self.display_settings.column_effective_height,
-            self.current_index, self.current_siblings.len(), None);
+            self.context.current_index, self.context.current_siblings.len(), None);
     }
 }
 
