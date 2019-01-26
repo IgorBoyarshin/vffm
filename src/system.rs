@@ -4,6 +4,7 @@ use std::process::{Command, Stdio};
 use std::collections::HashMap;
 use std::ops::RangeBounds;
 use std::ffi::OsStr;
+use std::process::Output;
 
 use crate::coloring::*;
 use crate::filesystem::*;
@@ -161,6 +162,7 @@ pub struct System {
 
     yanked_path: Option<PathBuf>,
     drawing_delay: i32,
+    process_handle: Option<Output>,
 }
 
 impl System {
@@ -215,6 +217,7 @@ impl System {
             spawn_patterns: System::generate_spawn_patterns(),
             yanked_path: None,
             drawing_delay,
+            process_handle: None,
         }
     }
 //-----------------------------------------------------------------------------
@@ -346,8 +349,15 @@ impl System {
         None
     }
 
+    fn spawn_process<S: AsRef<OsStr>>(app: &str, args: Vec<S>) -> Output {
+        Command::new(app).args(args)
+            .stderr(Stdio::null()).stdout(Stdio::piped())
+            .output().expect("failed to execute process")
+    }
+
     // TODO: somehow improve
     fn spawn<S: AsRef<OsStr>>(app: &str, args: Vec<S>, separate_io: bool, wait_finish: bool) {
+            // -> Option<Output> {
         if separate_io {
             if wait_finish {
                 Command::new(app).args(args)
@@ -376,9 +386,11 @@ impl System {
         false
     }
 
-    fn copy(path_old: &str, path_new: &str) {
-        System::spawn("rsync", vec!["-a", "-v", "-h", "--progress",
-            path_old, path_new], true, true);
+    fn copy(&mut self, src: &str, dst: &str) {
+        self.process_handle = Some(System::spawn_process("rsync",
+            vec!["-a", "-v", "-h", "--progress", src, dst]));
+        // System::spawn("rsync", vec!["-a", "-v", "-h", "--progress",
+        //     path_old, path_new], true, true);
     }
 
     pub fn paste_into_current(&mut self) {
@@ -392,7 +404,7 @@ impl System {
             while self.current_contains(&target_name) { target_name += "_"; }
             let dst = path_to_string(&self.parent_path.join(target_name));
 
-            System::copy(&src, &dst);
+            self.copy(&src, &dst);
             self.yanked_path = None;
         }
         self.update_current();
@@ -799,6 +811,11 @@ impl System {
         self.draw_current_permission(&mut cs);
         self.draw_current_size(&mut cs);
         self.draw_maybe_symlink_target(&mut cs);
+
+        // if self.process_handle.is_some() {
+        //     let out = String::from_utf8_lossy(&self.process_handle.as_ref().unwrap().stdout);
+        //     self.window.mvprintw(10, 10, out);
+        // }
 
         self.window.refresh();
     }
