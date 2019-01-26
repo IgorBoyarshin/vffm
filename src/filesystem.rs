@@ -164,6 +164,25 @@ pub fn is_symlink(path: &PathBuf) -> bool {
     (!meta.is_file() && !meta.is_dir())
 }
 
+pub fn is_dir(path: &PathBuf) -> bool {
+    let meta = path.symlink_metadata(); // Does not resolve the symlink
+    if meta.is_err() { return false; }
+    let meta = meta.unwrap();
+    meta.is_dir()
+}
+
+pub fn file_name(path: &PathBuf) -> String {
+    path.file_name().unwrap().to_str().unwrap().to_string()
+}
+
+pub fn path_to_str(path: &PathBuf) -> &str {
+    path.to_str().unwrap()
+}
+
+pub fn path_to_string(path: &PathBuf) -> String {
+    path.to_str().unwrap().to_string()
+}
+
 pub fn maybe_resolve_symlink_recursively(path: &PathBuf) -> PathBuf {
     if is_symlink(path) {
         if let Some(mut resolved_path) = resolve_symlink(path) {

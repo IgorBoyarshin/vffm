@@ -24,10 +24,6 @@ fn mvprintw(window: &Window, y: i32, x: i32, string: &str) -> i32 {
     printw(window, string)
 }
 //-----------------------------------------------------------------------------
-fn path_to_str(path: &PathBuf) -> &str {
-    path.to_str().unwrap()
-}
-//-----------------------------------------------------------------------------
 #[derive(Clone)]
 struct SpawnRule {
     rule: String,
@@ -162,6 +158,8 @@ pub struct System {
     sorting_type: SortingType,
     spawn_patterns: Vec<SpawnPattern>, // const
     symlink_target: Option<String>,
+
+    yanked_path: Option<PathBuf>,
 }
 
 impl System {
@@ -213,6 +211,7 @@ impl System {
 
             sorting_type,
             spawn_patterns: System::generate_spawn_patterns(),
+            yanked_path: None,
         }
     }
 //-----------------------------------------------------------------------------
@@ -344,25 +343,71 @@ impl System {
         None
     }
 
-    fn spawn<S: AsRef<OsStr>>(app: &str, args: Vec<S>, external: bool) {
-        if external {
-            Command::new(app).args(args)
-                .stderr(Stdio::null())
-                .stdout(Stdio::null())
-                .spawn().expect("failed to execute process");
+    // TODO: somehow improve
+    fn spawn<S: AsRef<OsStr>>(app: &str, args: Vec<S>, separate_io: bool, wait_finish: bool) {
+        if separate_io {
+            if wait_finish {
+                Command::new(app).args(args)
+                    .stderr(Stdio::null()).stdout(Stdio::null())
+                    .status().expect("failed to execute process");
+            } else {
+                Command::new(app).args(args)
+                    .stderr(Stdio::null()).stdout(Stdio::null())
+                    .spawn().expect("failed to execute process");
+            }
         } else {
-            Command::new(app).args(args)
-                .status().expect("failed to execute process");
+            if wait_finish {
+                Command::new(app).args(args)
+                    .status().expect("failed to execute process");
+            } else {
+                Command::new(app).args(args)
+                    .spawn().expect("failed to execute process");
+            }
         }
     }
 //-----------------------------------------------------------------------------
+    fn current_contains(&self, name: &str) -> bool {
+        for entry in self.current_siblings.iter() {
+            if entry.name == name { return true; }
+        }
+        false
+    }
+
+    fn copy(path_old: &str, path_new: &str) {
+        System::spawn("rsync", vec!["-a", "-v", "-h", "--progress",
+            path_old, path_new], true, true);
+    }
+
+    pub fn paste_into_current(&mut self) {
+        if self.yanked_path.is_some() {
+            let yanked_ref = self.yanked_path.as_ref().unwrap();
+
+            let mut src = path_to_string(yanked_ref);
+            if is_dir(yanked_ref) { src += "/"; } // so that rsync works as we want
+
+            let mut target_name = file_name(yanked_ref);
+            while self.current_contains(&target_name) { target_name += "_"; }
+            let dst = path_to_string(&self.parent_path.join(target_name));
+
+            System::copy(&src, &dst);
+            self.yanked_path = None;
+        }
+        self.update_current();
+    }
+
+    pub fn yank_selected(&mut self) {
+        if self.current_path.is_some() {
+            self.yanked_path = Some(self.current_path.as_ref().unwrap().clone());
+        }
+    }
+
     fn remove(path: &PathBuf) {
         if path.is_dir() {
-            System::spawn("rm", vec!["-r", "-f", path_to_str(path)], false);
+            System::spawn("rm", vec!["-r", "-f", path_to_str(path)], true, true);
         } else if path.is_file() {
-            System::spawn("rm", vec!["-f", path_to_str(path)], false);
+            System::spawn("rm", vec!["-f", path_to_str(path)], true, true);
         } else { // is symlink
-            System::spawn("unlink", vec![path_to_str(path)], false);
+            System::spawn("unlink", vec![path_to_str(path)], true, true);
         }
     }
 
@@ -611,7 +656,8 @@ impl System {
             // Try to open with default app
             let path = maybe_resolve_symlink_recursively(current_path_ref);
             if let Some((app, args, is_external)) = self.spawn_rule_for(&path) {
-                System::spawn(&app, args, is_external);
+                System::spawn(&app, args, is_external, !is_external);
+                self.update_current();
             }
         }
     }
