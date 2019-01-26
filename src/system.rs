@@ -175,7 +175,7 @@ impl System {
         let drawing_delay = 20;
         let window = System::setup(drawing_delay);
 
-        let sorting_type = SortingType::Any;
+        let sorting_type = SortingType::Lexicographically;
 
         let display_settings = System::generate_display_settings(
             &window, settings.scrolling_gap, &settings.columns_ratio);
@@ -197,6 +197,10 @@ impl System {
         }
     }
 //-----------------------------------------------------------------------------
+    fn generate_context_for(&mut self, path: PathBuf) -> Context {
+        System::generate_context(path, &self.display_settings, &self.sorting_type)
+    }
+
     fn generate_context(starting_path: PathBuf, display_settings: &DisplaySettings,
             sorting_type: &SortingType) -> Context {
         let current_siblings = collect_maybe_dir(&starting_path);
@@ -522,8 +526,9 @@ impl System {
     }
 //-----------------------------------------------------------------------------
     // Update all, affectively reloading everything
-    fn update(&self) {
-
+    fn update(&mut self) {
+        if self.context.current_path.is_none() { return; }
+        self.context = self.generate_context_for(self.context.current_path.as_ref().unwrap().clone());
     }
 
     // Update central column and right column
@@ -689,8 +694,9 @@ impl System {
         }
     }
 
-    pub fn goto(&self, path: &str) {
-
+    pub fn goto(&mut self, path: &str) {
+        self.context.current_path = Some(PathBuf::from(path));
+        self.update();
     }
 //-----------------------------------------------------------------------------
     fn draw_current_size(&self, cs: &mut ColorSystem) {
