@@ -273,13 +273,13 @@ pub fn index_of_name_inside(pathbuf: &PathBuf, name: &str) -> Option<usize> {
     } else { None }
 }
 
-pub fn index_inside(path: &PathBuf) -> usize {
-    if is_root(path) { return 0; }
-
-    let name = path.file_name().unwrap().to_str().unwrap();
-    let parent = path.parent().unwrap().to_path_buf();
-    index_of_name_inside(&parent, name).unwrap()
-}
+// pub fn index_inside(path: &PathBuf) -> usize {
+//     if is_root(path) { return 0; }
+//
+//     let name = path.file_name().unwrap().to_str().unwrap();
+//     let parent = path.parent().unwrap().to_path_buf();
+//     index_of_name_inside(&parent, name).unwrap()
+// }
 
 // pub fn get_parent_index(path: &PathBuf) -> usize {
 //     if is_root(path) {

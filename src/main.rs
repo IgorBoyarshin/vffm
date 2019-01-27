@@ -50,6 +50,7 @@ fn main() {
             unknown_paint: Paint::with_fg_bg(Color::Grey,   Color::White)  .bold(),
             preview_paint: Paint::with_fg_bg(Color::Green,  Color::Default),
             scrolling_gap: 4,
+            copy_done_notification_delay_ms: 2000,
         },
         starting_path,
     );

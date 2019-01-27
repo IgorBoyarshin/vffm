@@ -4,7 +4,9 @@ use std::process::{Command, Stdio};
 use std::collections::HashMap;
 use std::ops::RangeBounds;
 use std::ffi::OsStr;
-use std::process::Output;
+use std::process::Child;
+use std::io::Read;
+use std::time::SystemTime;
 
 use crate::coloring::*;
 use crate::filesystem::*;
@@ -23,6 +25,12 @@ fn printw(window: &Window, string: &str) -> i32 {
 fn mvprintw(window: &Window, y: i32, x: i32, string: &str) -> i32 {
     window.mv(y, x);
     printw(window, string)
+}
+
+fn millis_since(time: SystemTime) -> u128 {
+    let elapsed = SystemTime::now().duration_since(time);
+    if elapsed.is_err() { return 0; } // _now_ is earlier than _time_ => assume 0
+    elapsed.unwrap().as_millis()
 }
 //-----------------------------------------------------------------------------
 #[derive(Clone)]
@@ -105,14 +113,6 @@ impl RightColumn {
     fn preview_ref(&self) -> Option<&Vec<String>> {
         self.preview.as_ref()
     }
-
-    // fn holds_siblings(&self) -> bool {
-    //     self.siblings.is_some()
-    // }
-    //
-    // fn holds_preview(&self) -> bool {
-    //     self.preview.is_some()
-    // }
 }
 //-----------------------------------------------------------------------------
 pub struct Settings {
@@ -125,6 +125,7 @@ pub struct Settings {
 
     pub columns_ratio: Vec<u32>,
     pub scrolling_gap: usize,
+    pub copy_done_notification_delay_ms: u128,
 }
 
 struct DisplaySettings {
@@ -166,14 +167,31 @@ pub struct System {
     spawn_patterns: Vec<SpawnPattern>, // const
 
     yanked_path: Option<PathBuf>,
-    drawing_delay: i32, // pseudo-const
-    process_handle: Option<Output>,
+
+    copy_process_handle:          Option<Child>,
+    copy_process_last_read_time : Option<SystemTime>,
+    copy_process_progress:        Option<String>,
+}
+
+// TODO: place elsewhere
+enum DrawingDelay {
+    Copying,
+    Regular,
+}
+
+impl DrawingDelay {
+    fn ms(&self) -> i32 {
+        match self {
+            DrawingDelay::Copying => 1000,
+            DrawingDelay::Regular => 3000,
+        }
+    }
 }
 
 impl System {
     pub fn new(settings: Settings, starting_path: PathBuf) -> Self {
-        let drawing_delay = 20;
-        let window = System::setup(drawing_delay);
+        let window = System::setup();
+        System::set_drawing_delay(DrawingDelay::Regular);
 
         let sorting_type = SortingType::Lexicographically;
 
@@ -192,9 +210,16 @@ impl System {
             sorting_type,
             spawn_patterns: System::generate_spawn_patterns(),
             yanked_path: None,
-            drawing_delay,
-            process_handle: None,
+
+            copy_process_handle:         None,
+            copy_process_last_read_time: None,
+            copy_process_progress:       None,
         }
+    }
+
+    // TODO: place elsewhere
+    fn set_drawing_delay(drawing_delay: DrawingDelay) {
+        half_delay(drawing_delay.ms() / 100); // expects argument in tens of a second
     }
 //-----------------------------------------------------------------------------
     fn generate_context_for(&mut self, path: PathBuf) -> Context {
@@ -203,11 +228,12 @@ impl System {
 
     fn generate_context(starting_path: PathBuf, display_settings: &DisplaySettings,
             sorting_type: &SortingType) -> Context {
-        let current_siblings = collect_maybe_dir(&starting_path);
-        let parent_siblings = collect_siblings_of(&starting_path);
+        let current_siblings = System::sort(collect_maybe_dir(&starting_path), sorting_type);
+        let parent_siblings = System::sort(collect_siblings_of(&starting_path), sorting_type);
         let first_entry_path =
             System::path_of_nth_entry_inside(0, &starting_path, &current_siblings);
-        let parent_index = index_inside(&starting_path);
+        // let parent_index = index_inside(&starting_path);
+        let parent_index = System::index_of_entry_inside(&starting_path, &parent_siblings).unwrap();
         let current_index = 0;
         let column_index = 2;
         let (begin, end) = display_settings.columns_coord[column_index];
@@ -253,6 +279,15 @@ impl System {
             column_effective_height,
             entries_display_begin: 2, // gap + border
         }
+    }
+
+    fn index_of_entry_inside(path: &PathBuf, entries: &Vec<Entry>) -> Option<usize> {
+        if is_root(path) { return Some(0); }
+        let sought_name = path.file_name().unwrap().to_str().unwrap();
+        for (index, Entry {name, ..}) in entries.iter().enumerate() {
+            if sought_name == name { return Some(index); }
+        }
+        None
     }
 
     fn resize_scrolling_gap_until_fits(mut gap: usize, column_effective_height: usize) -> usize {
@@ -365,10 +400,10 @@ impl System {
         None
     }
 
-    fn spawn_process<S: AsRef<OsStr>>(app: &str, args: Vec<S>) -> Output {
+    fn spawn_process<S: AsRef<OsStr>>(app: &str, args: Vec<S>) -> Child {
         Command::new(app).args(args)
             .stderr(Stdio::null()).stdout(Stdio::piped())
-            .output().expect("failed to execute process")
+            .spawn().expect("failed to execute process")
     }
 
     // TODO: somehow improve
@@ -403,10 +438,11 @@ impl System {
     }
 
     fn copy(&mut self, src: &str, dst: &str) {
-        self.process_handle = Some(System::spawn_process("rsync",
+        self.copy_process_handle = Some(System::spawn_process("rsync",
             vec!["-a", "-v", "-h", "--progress", src, dst]));
-        // System::spawn("rsync", vec!["-a", "-v", "-h", "--progress",
-        //     path_old, path_new], true, true);
+        self.copy_process_last_read_time = None; // will be set after the first pipe read attempt
+        self.copy_process_progress = Some("Copying...".to_string());
+        System::set_drawing_delay(DrawingDelay::Copying);
     }
 
     pub fn paste_into_current(&mut self) {
@@ -546,6 +582,51 @@ impl System {
         self.context.current_siblings_shift = self.recalculate_current_siblings_shift();
     }
 
+    fn update_copy_progress(&mut self) {
+        if self.copy_process_handle.is_none() { // done with copying itself
+            if self.copy_process_last_read_time.is_some() { // still displaying
+                let last = self.copy_process_last_read_time.as_ref().unwrap().clone();
+                if millis_since(last) > self.settings.copy_done_notification_delay_ms {
+                    // Done displaying
+                    self.copy_process_last_read_time = None;
+                    self.copy_process_progress       = None;
+                } // else let display for some more time
+            }
+            return;
+        }
+
+        // Still copying
+        let handle = self.copy_process_handle.as_mut().unwrap();
+        if let Ok(Some(_status)) = handle.try_wait() { // process has exited
+            // Done copying
+            self.copy_process_handle         = None;
+            self.copy_process_last_read_time = Some(SystemTime::now()); // pivot for notification
+            self.copy_process_progress       = Some("Done copying!".to_string());
+            System::set_drawing_delay(DrawingDelay::Regular);
+        } else { // try to read copying progress
+            // Approx delay between subsequent updates in rsync's output:
+            let rsync_delay_millis = 1000;
+            let can_read = self.copy_process_last_read_time.is_none() || // first attempt to read
+                millis_since(self.copy_process_last_read_time.unwrap()) > rsync_delay_millis;
+            if can_read {
+                let mut it = handle.stdout.as_mut().unwrap().bytes();
+                let mut number = String::new();
+                while let Some(c) = it.next() { // may block!!
+                    let c = c.unwrap();
+                    if c == b'%' {
+                        let end = number.len();
+                        let start = end - 3;
+                        let percent = number.get(start..end).unwrap().to_string();
+                        let text = "Copying...(".to_string() + &percent + "% done)";
+                        self.copy_process_progress = Some(text);
+                        break; // done reading for now (probably there are no more '%' yet)
+                    } else { number.push(c as char); }
+                }
+                self.copy_process_last_read_time = Some(SystemTime::now()); // pivot for next attempt
+            } // else too early => don't try to read (to update)
+        }
+    }
+
     // Update current entry and right column
     // fn update_current_entry(&self) {
     //
@@ -662,7 +743,8 @@ impl System {
             self.common_left_right();
 
             self.context.current_index = self.context.parent_index;
-            self.context.parent_index = index_inside(&self.context.parent_path);
+            self.context.parent_index = System::index_of_entry_inside(
+                &self.context.parent_path, &self.context.parent_siblings).unwrap();
             self.context.current_siblings_shift = self.context.parent_siblings_shift;
             self.context.parent_siblings_shift = self.recalculate_parent_siblings_shift();
         }
@@ -699,6 +781,127 @@ impl System {
         self.update();
     }
 //-----------------------------------------------------------------------------
+
+
+    fn list_entry(&self, cs: &mut ColorSystem, column_index: usize,
+            y: usize, entry: &Entry, selected: bool) {
+        let paint = match entry.entrytype {
+            EntryType::Regular => self.settings.file_paint,
+            EntryType::Directory => self.settings.dir_paint,
+            EntryType::Symlink => self.settings.symlink_paint,
+            EntryType::Unknown => self.settings.unknown_paint,
+        };
+        let paint = System::maybe_selected_paint_from(paint, selected);
+        cs.set_paint(&self.window, paint);
+
+        let (begin, end) = self.display_settings.columns_coord[column_index];
+        let column_width = end - begin;
+        let size = System::human_size(entry.size);
+        let size_len = size.len();
+        let name_len = System::chars_amount(&entry.name) as i32;
+        let empty_space_length = column_width - name_len - size_len as i32;
+        let y = y as Coord + self.display_settings.entries_display_begin;
+        if empty_space_length < 1 {
+            // everything doesn't fit => sacrifice Size and truncate the Name
+            let name = System::truncate_with_delimiter(&entry.name, column_width);
+            let name_len = System::chars_amount(&name) as i32;
+            let leftover = column_width - name_len;
+            mvprintw(&self.window, y, begin + 1, &name);
+            self.window.mv(y, begin + 1 + name_len);
+            self.window.hline(' ', leftover);
+        } else { // everything fits OK
+            mvprintw(&self.window, y, begin + 1, &entry.name);
+            self.window.mv(y, begin + 1 + name_len);
+            self.window.hline(' ', empty_space_length);
+            mvprintw(&self.window, y, begin + 1 + name_len + empty_space_length, &size);
+        }
+    }
+
+    fn list_entries(&self, mut cs: &mut ColorSystem, column_index: usize,
+            entries: &Vec<Entry>, selected_index: Option<usize>, shift: usize) {
+        for (index, entry) in entries.into_iter().enumerate()
+                .skip(shift).take(self.display_settings.column_effective_height) {
+            let selected = match selected_index {
+                Some(i) => (i == index),
+                None    => false,
+            };
+            self.list_entry(&mut cs, column_index, index - shift, &entry, selected);
+        }
+    }
+//-----------------------------------------------------------------------------
+    pub fn clear(&self, cs: &mut ColorSystem) {
+        cs.set_paint(&self.window, self.settings.primary_paint);
+        for y in 0..self.display_settings.height {
+            self.window.mv(y, 0);
+            self.window.hline(' ', self.display_settings.width);
+        }
+        self.window.refresh();
+    }
+
+    pub fn draw(&mut self, mut cs: &mut ColorSystem) {
+        self.update_current(); // TODO
+        self.update_copy_progress();
+
+        self.draw_borders(&mut cs);
+
+        self.draw_left_column(&mut cs);
+        self.draw_middle_column(&mut cs);
+        self.draw_right_column(&mut cs);
+
+        self.draw_current_path(&mut cs);
+        self.draw_current_permission(&mut cs);
+        self.draw_current_size(&mut cs);
+        self.draw_maybe_symlink_target(&mut cs);
+        self.draw_copy_progress(&mut cs);
+
+        self.window.refresh();
+    }
+
+    fn draw_copy_progress(&self, cs: &mut ColorSystem) {
+        if self.copy_process_progress.is_some() {
+            let text = self.copy_process_progress.as_ref().unwrap();
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
+            mvprintw(&self.window, self.display_settings.height - 1, 20, text);
+        }
+    }
+
+    pub fn draw_available_matches(&self, cs: &mut ColorSystem,
+            matches: &Matches, completion_count: usize) {
+        if matches.is_empty() { return; }
+
+        // Borders
+        cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
+        let y = self.display_settings.height - 2 - matches.len() as i32 - 1;
+        self.window.mv(y, 0);
+        self.window.hline(ACS_HLINE(), self.display_settings.width);
+        self.window.mv(self.display_settings.height - 2, 0);
+        self.window.hline(ACS_HLINE(), self.display_settings.width);
+
+        let max_len = max_combination_len() as i32;
+        for (i, (combination, command)) in matches.iter().enumerate() {
+            let y = y + 1 + i as i32;
+
+            // Combination
+            let (completed_part, uncompleted_part) = combination.split_at(completion_count);
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default).bold());
+            mvprintw(&self.window, y, 0, &completed_part);
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
+            printw(  &self.window,       &uncompleted_part);
+
+            // Space till description
+            let left = max_len - combination.len() as i32;
+            self.window.hline(' ', left);
+
+            // Command description
+            let description = description_of(&command);
+            mvprintw(&self.window, y, max_len as i32, &description);
+
+            // Space till end
+            let left = self.display_settings.width - max_len - description.len() as i32;
+            self.window.hline(' ', left);
+        }
+    }
+
     fn draw_current_size(&self, cs: &mut ColorSystem) {
         if self.context.current_path.is_some() {
             let size = System::human_size(self.unsafe_current_entry_ref().size);
@@ -764,119 +967,6 @@ impl System {
                 mvprintw(&self.window, y + i as i32, begin + 1, line);
             }
         } // display nothing otherwise
-    }
-
-
-    fn list_entry(&self, cs: &mut ColorSystem, column_index: usize,
-            y: usize, entry: &Entry, selected: bool) {
-        let paint = match entry.entrytype {
-            EntryType::Regular => self.settings.file_paint,
-            EntryType::Directory => self.settings.dir_paint,
-            EntryType::Symlink => self.settings.symlink_paint,
-            EntryType::Unknown => self.settings.unknown_paint,
-        };
-        let paint = System::maybe_selected_paint_from(paint, selected);
-        cs.set_paint(&self.window, paint);
-
-        let (begin, end) = self.display_settings.columns_coord[column_index];
-        let column_width = end - begin;
-        let size = System::human_size(entry.size);
-        let size_len = size.len();
-        let name_len = System::chars_amount(&entry.name) as i32;
-        let empty_space_length = column_width - name_len - size_len as i32;
-        let y = y as Coord + self.display_settings.entries_display_begin;
-        if empty_space_length < 1 {
-            // everything doesn't fit => sacrifice Size and truncate the Name
-            let name = System::truncate_with_delimiter(&entry.name, column_width);
-            let name_len = System::chars_amount(&name) as i32;
-            let leftover = column_width - name_len;
-            mvprintw(&self.window, y, begin + 1, &name);
-            self.window.mv(y, begin + 1 + name_len);
-            self.window.hline(' ', leftover);
-        } else { // everything fits OK
-            mvprintw(&self.window, y, begin + 1, &entry.name);
-            self.window.mv(y, begin + 1 + name_len);
-            self.window.hline(' ', empty_space_length);
-            mvprintw(&self.window, y, begin + 1 + name_len + empty_space_length, &size);
-        }
-    }
-
-    fn list_entries(&self, mut cs: &mut ColorSystem, column_index: usize,
-            entries: &Vec<Entry>, selected_index: Option<usize>, shift: usize) {
-        for (index, entry) in entries.into_iter().enumerate()
-                .skip(shift).take(self.display_settings.column_effective_height) {
-            let selected = match selected_index {
-                Some(i) => (i == index),
-                None    => false,
-            };
-            self.list_entry(&mut cs, column_index, index - shift, &entry, selected);
-        }
-    }
-//-----------------------------------------------------------------------------
-    pub fn clear(&self, cs: &mut ColorSystem) {
-        cs.set_paint(&self.window, self.settings.primary_paint);
-        for y in 0..self.display_settings.height {
-            self.window.mv(y, 0);
-            self.window.hline(' ', self.display_settings.width);
-        }
-        self.window.refresh();
-    }
-
-    pub fn draw(&self, mut cs: &mut ColorSystem) {
-        self.draw_borders(&mut cs);
-
-        self.draw_left_column(&mut cs);
-        self.draw_middle_column(&mut cs);
-        self.draw_right_column(&mut cs);
-
-        self.draw_current_path(&mut cs);
-        self.draw_current_permission(&mut cs);
-        self.draw_current_size(&mut cs);
-        self.draw_maybe_symlink_target(&mut cs);
-
-        // if self.process_handle.is_some() {
-        //     let out = String::from_utf8_lossy(&self.process_handle.as_ref().unwrap().stdout);
-        //     self.window.mvprintw(10, 10, out);
-        // }
-
-        self.window.refresh();
-    }
-
-    pub fn draw_available_matches(&self, cs: &mut ColorSystem,
-            matches: &Matches, completion_count: usize) {
-        if matches.is_empty() { return; }
-
-        // Borders
-        cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-        let y = self.display_settings.height - 2 - matches.len() as i32 - 1;
-        self.window.mv(y, 0);
-        self.window.hline(ACS_HLINE(), self.display_settings.width);
-        self.window.mv(self.display_settings.height - 2, 0);
-        self.window.hline(ACS_HLINE(), self.display_settings.width);
-
-        let max_len = max_combination_len() as i32;
-        for (i, (combination, command)) in matches.iter().enumerate() {
-            let y = y + 1 + i as i32;
-
-            // Combination
-            let (completed_part, uncompleted_part) = combination.split_at(completion_count);
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default).bold());
-            mvprintw(&self.window, y, 0, &completed_part);
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-            printw(  &self.window,       &uncompleted_part);
-
-            // Space till description
-            let left = max_len - combination.len() as i32;
-            self.window.hline(' ', left);
-
-            // Command description
-            let description = description_of(&command);
-            mvprintw(&self.window, y, max_len as i32, &description);
-
-            // Space till end
-            let left = self.display_settings.width - max_len - description.len() as i32;
-            self.window.hline(' ', left);
-        }
     }
 
     fn draw_empty_sign(&self, cs: &mut ColorSystem, column_index: usize) {
@@ -1029,11 +1119,10 @@ impl System {
         string.chars().count()
     }
 //-----------------------------------------------------------------------------
-    fn setup(drawing_delay: i32) -> Window {
+    fn setup() -> Window {
         let window = initscr();
         window.refresh();
         window.keypad(true);
-        half_delay(drawing_delay);
         start_color();
         use_default_colors();
         noecho();
