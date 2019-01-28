@@ -242,6 +242,7 @@ impl System {
         add_to_apps(&mut apps_extensions, "vim @", System::text_extensions(), not_external);
         add_to_apps(&mut apps_exact_names, "vim @", System::text_exact_names(), not_external);
         add_to_apps(&mut apps_extensions, "vlc @", vec!["mkv", "avi", "mp4", "mp3"], external);
+        add_to_apps(&mut apps_extensions, "rifle_sxiv @", vec!["jpg", "jpeg", "png"], external);
 
         let mut patterns: Vec<SpawnPattern> = Vec::new();
         for (app, (extensions, is_external)) in apps_extensions.into_iter() {
