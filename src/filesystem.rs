@@ -261,17 +261,17 @@ fn into_entry(dir_entry: DirEntry) -> Entry {
 //     } else { None }
 // }
 
-pub fn index_of_name_inside(pathbuf: &PathBuf, name: &str) -> Option<usize> {
-    let result = fs::read_dir(pathbuf)
-        .expect(&format!("Could not read dir{}", pathbuf.to_str().expect("")))
-        .into_iter()
-        .map(|elem| elem.unwrap().file_name().to_str().unwrap().to_string())
-        .enumerate()
-        .find(|(_, elem)| elem == &name);
-    if let Some((index, _)) = result {
-        Some(index)
-    } else { None }
-}
+// pub fn index_of_name_inside(pathbuf: &PathBuf, name: &str) -> Option<usize> {
+//     let result = fs::read_dir(pathbuf)
+//         .expect(&format!("Could not read dir{}", pathbuf.to_str().expect("")))
+//         .into_iter()
+//         .map(|elem| elem.unwrap().file_name().to_str().unwrap().to_string())
+//         .enumerate()
+//         .find(|(_, elem)| elem == &name);
+//     if let Some((index, _)) = result {
+//         Some(index)
+//     } else { None }
+// }
 
 // pub fn index_inside(path: &PathBuf) -> usize {
 //     if is_root(path) { return 0; }

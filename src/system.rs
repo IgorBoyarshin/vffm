@@ -13,107 +13,6 @@ use crate::filesystem::*;
 use crate::input::*;
 
 
-
-type Coord = i32;
-//-----------------------------------------------------------------------------
-fn printw(window: &Window, string: &str) -> i32 {
-    // To avoid printw's substitution
-    let string = string.to_string().replace("%", "%%");
-    window.printw(string)
-}
-
-fn mvprintw(window: &Window, y: i32, x: i32, string: &str) -> i32 {
-    window.mv(y, x);
-    printw(window, string)
-}
-
-fn millis_since(time: SystemTime) -> u128 {
-    let elapsed = SystemTime::now().duration_since(time);
-    if elapsed.is_err() { return 0; } // _now_ is earlier than _time_ => assume 0
-    elapsed.unwrap().as_millis()
-}
-//-----------------------------------------------------------------------------
-#[derive(Clone)]
-struct SpawnRule {
-    rule: String,
-    is_external: bool,
-}
-
-impl SpawnRule {
-    fn generate(&self, file_name: &str) -> (String, Vec<String>, bool) {
-        let placeholder = "@";
-        let mut args = Vec::new();
-        let mut parts = self.rule.split_whitespace();
-        let app = parts.next().unwrap();
-        for arg in parts { // the rest
-            if arg == placeholder { args.push(file_name.to_string()); }
-            else                  { args.push(arg.to_string()); }
-        }
-        (app.to_string(), args, self.is_external)
-    }
-}
-
-enum SpawnFile {
-    Extension(String),
-    ExactName(String),
-}
-
-struct SpawnPattern {
-    file: SpawnFile,
-    rule: SpawnRule,
-}
-
-impl SpawnPattern {
-    fn new_ext(ext: &str, rule: &str, is_external: bool) -> SpawnPattern {
-        SpawnPattern {
-            file: SpawnFile::Extension(ext.to_string()),
-            rule: SpawnRule{ rule: rule.to_string(), is_external },
-        }
-    }
-
-    fn new_exact(name: &str, rule: &str, is_external: bool) -> SpawnPattern {
-        SpawnPattern {
-            file: SpawnFile::ExactName(name.to_string()),
-            rule: SpawnRule{ rule: rule.to_string(), is_external },
-        }
-    }
-}
-//-----------------------------------------------------------------------------
-struct RightColumn {
-    siblings: Option<Vec<Entry>>,
-    preview: Option<Vec<String>>,
-}
-
-impl RightColumn {
-    fn with_siblings(siblings: Vec<Entry>) -> RightColumn {
-        RightColumn {
-            siblings: Some(siblings),
-            preview: None,
-        }
-    }
-
-    fn with_preview(preview: Vec<String>) -> RightColumn {
-        RightColumn {
-            siblings: None,
-            preview: Some(preview),
-        }
-    }
-
-    fn empty() -> RightColumn {
-        RightColumn {
-            siblings: None,
-            preview: None,
-        }
-    }
-
-    fn siblings_ref(&self) -> Option<&Vec<Entry>> {
-        self.siblings.as_ref()
-    }
-
-    fn preview_ref(&self) -> Option<&Vec<String>> {
-        self.preview.as_ref()
-    }
-}
 //-----------------------------------------------------------------------------
 pub struct Settings {
     pub primary_paint: Paint,
@@ -173,38 +72,20 @@ pub struct System {
     copy_process_progress:        Option<String>,
 }
 
-// TODO: place elsewhere
-enum DrawingDelay {
-    Copying,
-    Regular,
-}
-
-impl DrawingDelay {
-    fn ms(&self) -> i32 {
-        match self {
-            DrawingDelay::Copying => 1000,
-            DrawingDelay::Regular => 3000,
-        }
-    }
-}
-
 impl System {
     pub fn new(settings: Settings, starting_path: PathBuf) -> Self {
         let window = System::setup();
         System::set_drawing_delay(DrawingDelay::Regular);
 
         let sorting_type = SortingType::Lexicographically;
-
         let display_settings = System::generate_display_settings(
             &window, settings.scrolling_gap, &settings.columns_ratio);
-
         let context = System::generate_context(starting_path, &display_settings, &sorting_type);
 
         System {
             window,
             settings,
             display_settings,
-
             context,
 
             sorting_type,
@@ -215,11 +96,6 @@ impl System {
             copy_process_last_read_time: None,
             copy_process_progress:       None,
         }
-    }
-
-    // TODO: place elsewhere
-    fn set_drawing_delay(drawing_delay: DrawingDelay) {
-        half_delay(drawing_delay.ms() / 100); // expects argument in tens of a second
     }
 //-----------------------------------------------------------------------------
     fn generate_context_for(&mut self, path: PathBuf) -> Context {
@@ -232,7 +108,6 @@ impl System {
         let parent_siblings = System::sort(collect_siblings_of(&starting_path), sorting_type);
         let first_entry_path =
             System::path_of_nth_entry_inside(0, &starting_path, &current_siblings);
-        // let parent_index = index_inside(&starting_path);
         let parent_index = System::index_of_entry_inside(&starting_path, &parent_siblings).unwrap();
         let current_index = 0;
         let column_index = 2;
@@ -280,7 +155,7 @@ impl System {
             entries_display_begin: 2, // gap + border
         }
     }
-
+//-----------------------------------------------------------------------------
     fn index_of_entry_inside(path: &PathBuf, entries: &Vec<Entry>) -> Option<usize> {
         if is_root(path) { return Some(0); }
         let sought_name = path.file_name().unwrap().to_str().unwrap();
@@ -294,7 +169,7 @@ impl System {
         while 2 * gap >= column_effective_height { gap -= 1; } // gap too large
         gap
     }
-
+//-----------------------------------------------------------------------------
     fn collect_right_column_of_current(&self) -> RightColumn {
         let column_index = 2;
         let (begin, end) = self.display_settings.columns_coord[column_index];
@@ -321,7 +196,7 @@ impl System {
         }
         RightColumn::empty()
     }
-
+//-----------------------------------------------------------------------------
     fn read_preview_of(path: &PathBuf, max_height: usize) -> Option<Vec<String>> {
         let file_name = path.file_name().unwrap().to_str().unwrap();
         if System::is_previewable(file_name) {
@@ -400,35 +275,50 @@ impl System {
         None
     }
 
-    fn spawn_process<S: AsRef<OsStr>>(app: &str, args: Vec<S>) -> Child {
+    fn spawn_process_async<S: AsRef<OsStr>>(app: &str, args: Vec<S>) -> Child {
         Command::new(app).args(args)
             .stderr(Stdio::null()).stdout(Stdio::piped())
             .spawn().expect("failed to execute process")
     }
 
-    // TODO: somehow improve
-    fn spawn<S: AsRef<OsStr>>(app: &str, args: Vec<S>, separate_io: bool, wait_finish: bool) {
-            // -> Option<Output> {
-        if separate_io {
-            if wait_finish {
-                Command::new(app).args(args)
-                    .stderr(Stdio::null()).stdout(Stdio::null())
-                    .status().expect("failed to execute process");
-            } else {
-                Command::new(app).args(args)
-                    .stderr(Stdio::null()).stdout(Stdio::null())
-                    .spawn().expect("failed to execute process");
-            }
+    fn spawn_process_wait<S: AsRef<OsStr>>(app: &str, args: Vec<S>) {
+        Command::new(app).args(args)
+            .stderr(Stdio::null()).stdout(Stdio::null())
+            .status().expect("failed to execute process");
+    }
+
+    fn spawn_program<S: AsRef<OsStr>>(app: &str, args: Vec<S>, is_external: bool) {
+        if is_external {
+            Command::new(app).args(args)
+                .stderr(Stdio::null()).stdout(Stdio::null())
+                .spawn().expect("failed to execute process");
         } else {
-            if wait_finish {
-                Command::new(app).args(args)
-                    .status().expect("failed to execute process");
-            } else {
-                Command::new(app).args(args)
-                    .spawn().expect("failed to execute process");
-            }
+            Command::new(app).args(args)
+                .status().expect("failed to execute process");
         }
     }
+
+    // fn spawn<S: AsRef<OsStr>>(app: &str, args: Vec<S>, separate_io: bool, wait_finish: bool) {
+    //     if separate_io {
+    //         if wait_finish {
+    //             Command::new(app).args(args)
+    //                 .stderr(Stdio::null()).stdout(Stdio::null())
+    //                 .status().expect("failed to execute process");
+    //         } else {
+    //             Command::new(app).args(args)
+    //                 .stderr(Stdio::null()).stdout(Stdio::null())
+    //                 .spawn().expect("failed to execute process");
+    //         }
+    //     } else {
+    //         if wait_finish {
+    //             Command::new(app).args(args)
+    //                 .status().expect("failed to execute process");
+    //         } else {
+    //             Command::new(app).args(args)
+    //                 .spawn().expect("failed to execute process");
+    //         }
+    //     }
+    // }
 //-----------------------------------------------------------------------------
     fn current_contains(&self, name: &str) -> bool {
         for entry in self.context.current_siblings.iter() {
@@ -438,7 +328,7 @@ impl System {
     }
 
     fn copy(&mut self, src: &str, dst: &str) {
-        self.copy_process_handle = Some(System::spawn_process("rsync",
+        self.copy_process_handle = Some(System::spawn_process_async("rsync",
             vec!["-a", "-v", "-h", "--progress", src, dst]));
         self.copy_process_last_read_time = None; // will be set after the first pipe read attempt
         self.copy_process_progress = Some("Copying...".to_string());
@@ -470,11 +360,11 @@ impl System {
 
     fn remove(path: &PathBuf) {
         if path.is_dir() {
-            System::spawn("rm", vec!["-r", "-f", path_to_str(path)], true, true);
+            System::spawn_process_wait("rm", vec!["-r", "-f", path_to_str(path)]);
         } else if path.is_file() {
-            System::spawn("rm", vec!["-f", path_to_str(path)], true, true);
+            System::spawn_process_wait("rm", vec!["-f", path_to_str(path)]);
         } else { // is symlink
-            System::spawn("unlink", vec![path_to_str(path)], true, true);
+            System::spawn_process_wait("unlink", vec![path_to_str(path)]);
         }
     }
 
@@ -557,9 +447,9 @@ impl System {
     //     } else { false }
     // }
 
-    fn is_dir_or_symlink(path: &PathBuf) -> bool {
-        !path.is_file()
-    }
+    // fn is_dir_or_symlink(path: &PathBuf) -> bool {
+    //     !path.is_file()
+    // }
 //-----------------------------------------------------------------------------
     // Update all, affectively reloading everything
     fn update(&mut self) {
@@ -770,7 +660,7 @@ impl System {
             // Try to open with default app
             let path = maybe_resolve_symlink_recursively(current_path_ref);
             if let Some((app, args, is_external)) = self.spawn_rule_for(&path) {
-                System::spawn(&app, args, is_external, !is_external);
+                System::spawn_program(&app, args, is_external);
                 self.update_current();
             }
         }
@@ -1130,6 +1020,10 @@ impl System {
         window
     }
 
+    fn set_drawing_delay(drawing_delay: DrawingDelay) {
+        half_delay(drawing_delay.ms() / 100); // expects argument in tens of a second
+    }
+
     fn get_height_width(window: &Window) -> (i32, i32) {
         window.get_max_yx()
     }
@@ -1157,3 +1051,119 @@ impl Drop for System {
         println!("Done");
     }
 }
+//-----------------------------------------------------------------------------
+fn printw(window: &Window, string: &str) -> i32 {
+    // To avoid printw's substitution
+    let string = string.to_string().replace("%", "%%");
+    window.printw(string)
+}
+
+fn mvprintw(window: &Window, y: i32, x: i32, string: &str) -> i32 {
+    window.mv(y, x);
+    printw(window, string)
+}
+
+fn millis_since(time: SystemTime) -> u128 {
+    let elapsed = SystemTime::now().duration_since(time);
+    if elapsed.is_err() { return 0; } // _now_ is earlier than _time_ => assume 0
+    elapsed.unwrap().as_millis()
+}
+//-----------------------------------------------------------------------------
+#[derive(Clone)]
+struct SpawnRule {
+    rule: String,
+    is_external: bool,
+}
+
+impl SpawnRule {
+    fn generate(&self, file_name: &str) -> (String, Vec<String>, bool) {
+        let placeholder = "@";
+        let mut args = Vec::new();
+        let mut parts = self.rule.split_whitespace();
+        let app = parts.next().unwrap();
+        for arg in parts { // the rest
+            if arg == placeholder { args.push(file_name.to_string()); }
+            else                  { args.push(arg.to_string()); }
+        }
+        (app.to_string(), args, self.is_external)
+    }
+}
+
+enum SpawnFile {
+    Extension(String),
+    ExactName(String),
+}
+
+struct SpawnPattern {
+    file: SpawnFile,
+    rule: SpawnRule,
+}
+
+impl SpawnPattern {
+    fn new_ext(ext: &str, rule: &str, is_external: bool) -> SpawnPattern {
+        SpawnPattern {
+            file: SpawnFile::Extension(ext.to_string()),
+            rule: SpawnRule{ rule: rule.to_string(), is_external },
+        }
+    }
+
+    fn new_exact(name: &str, rule: &str, is_external: bool) -> SpawnPattern {
+        SpawnPattern {
+            file: SpawnFile::ExactName(name.to_string()),
+            rule: SpawnRule{ rule: rule.to_string(), is_external },
+        }
+    }
+}
+//-----------------------------------------------------------------------------
+struct RightColumn {
+    siblings: Option<Vec<Entry>>,
+    preview: Option<Vec<String>>,
+}
+
+impl RightColumn {
+    fn with_siblings(siblings: Vec<Entry>) -> RightColumn {
+        RightColumn {
+            siblings: Some(siblings),
+            preview: None,
+        }
+    }
+
+    fn with_preview(preview: Vec<String>) -> RightColumn {
+        RightColumn {
+            siblings: None,
+            preview: Some(preview),
+        }
+    }
+
+    fn empty() -> RightColumn {
+        RightColumn {
+            siblings: None,
+            preview: None,
+        }
+    }
+
+    fn siblings_ref(&self) -> Option<&Vec<Entry>> {
+        self.siblings.as_ref()
+    }
+
+    fn preview_ref(&self) -> Option<&Vec<String>> {
+        self.preview.as_ref()
+    }
+}
+//-----------------------------------------------------------------------------
+enum DrawingDelay {
+    Copying,
+    Regular,
+}
+
+impl DrawingDelay {
+    fn ms(&self) -> i32 {
+        match self {
+            DrawingDelay::Copying => 1000,
+            DrawingDelay::Regular => 3000,
+        }
+    }
+}
+
+//-----------------------------------------------------------------------------
+type Coord = i32;
