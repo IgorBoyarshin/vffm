@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::fs::{self, DirEntry};
 use std::io::BufReader;
 use std::io::BufRead;
-
+use std::ffi::OsStr;
 
 //-----------------------------------------------------------------------------
 // use std::time::{SystemTime};
@@ -183,6 +183,10 @@ pub fn path_to_string(path: &PathBuf) -> String {
     path.to_str().unwrap().to_string()
 }
 
+pub fn osstr_to_str(osstr: &OsStr) -> &str {
+    osstr.to_str().unwrap()
+}
+
 pub fn maybe_resolve_symlink_recursively(path: &PathBuf) -> PathBuf {
     if is_symlink(path) {
         if let Some(mut resolved_path) = resolve_symlink(path) {
@@ -252,13 +256,15 @@ fn into_entry(dir_entry: DirEntry) -> Entry {
     }
 }
 
-fn size(path: &PathBuf) -> u64 {
+pub type Size = u64;
+
+fn size(path: &PathBuf) -> Size {
     path.symlink_metadata()
         .expect(&format!("Could not read metadata for {:?}", path))
         .len()
 }
 
-pub fn cumulative_size(path: &PathBuf) -> u64 {
+pub fn cumulative_size(path: &PathBuf) -> Size {
     if path.symlink_metadata().unwrap().is_dir() {
         fs::read_dir(path).unwrap()
             .map(|entry| entry.unwrap().path())

@@ -14,6 +14,42 @@ use crate::input::*;
 
 
 //-----------------------------------------------------------------------------
+struct TransferData {
+    // None if the pasting has started (protection against double-pasting).
+    // Upon the end of pasting the TransferData itself will become None.
+    src_paths: Option<Vec<PathBuf>>,
+    src_sizes: Vec<Size>,
+    dst_paths: Option<Vec<PathBuf>>, // None if the pasting has not started yet
+    dst_sizes: Vec<Size>,
+    dst_finished: Vec<bool>,
+}
+
+impl TransferData {
+    fn new(src_paths: Vec<&PathBuf>) -> TransferData {
+        let amount = src_paths.len();
+        let src_sizes: Vec<Size> = src_paths.iter().map(|path| cumulative_size(&path)).collect();
+        let src_paths: Option<Vec<_>> = Some(src_paths.into_iter().map(|path| path.clone()).collect());
+        // let src_paths: Vec<String> = src_paths.into_iter().map(|path| path_to_string(&path)).collect();
+        TransferData {
+            src_paths,
+            src_sizes,
+            dst_paths: None,
+            dst_sizes: vec![0; amount],
+            dst_finished: vec![false; amount],
+        }
+    }
+
+    fn with_dst(&mut self, parent: &PathBuf) {
+        self.dst_paths = Some(self.src_paths.as_ref().unwrap().iter()
+            .map(|path| osstr_to_str(path.file_name().unwrap()))
+            .map(|name| {
+                let mut path = parent.clone();
+                path.set_file_name(name);
+                path
+            }).collect());
+    }
+}
+
 pub struct Settings {
     pub primary_paint: Paint,
     pub dir_paint: Paint,
@@ -72,6 +108,9 @@ pub struct System {
     copy_process_progress:       Option<String>,
 
     notification_text: Option<String>,
+
+    transfer_data:   Option<TransferData>,
+    // transfer_handle: Option<Child>,
 }
 
 impl System {
@@ -99,6 +138,9 @@ impl System {
             copy_process_progress:       None,
 
             notification_text: None,
+
+            transfer_data:   None,
+            // transfer_handle: None,
         }
     }
 //-----------------------------------------------------------------------------
@@ -332,10 +374,10 @@ impl System {
         false
     }
 
-    // fn cut(&self, src: &str, dst: &str) {
-    //     copy_process_handle = Some(System::spawn_process_async("rsync",
-    //         vec!["-a", "-v", "-h", "--progress", src, dst]));
-    // }
+    fn cut(src: &PathBuf, dst: &PathBuf) {
+        System::spawn_process_async("mv", vec![path_to_str(src), path_to_str(dst)]);
+        System::set_drawing_delay(DrawingDelay::Copying);
+    }
 
     fn copy(&mut self, src: &str, dst: &str) {
         self.copy_process_handle = Some(System::spawn_process_async("rsync",
@@ -346,6 +388,18 @@ impl System {
     }
 
     pub fn paste_into_current(&mut self) {
+        if self.transfer_data.is_some() {
+            if self.transfer_data.as_ref().unwrap().src_paths.is_some() {
+                let dst = &self.context.parent_path;
+                for item in self.transfer_data.as_ref().unwrap()
+                                    .src_paths.as_ref().unwrap().iter() {
+                    System::cut(&item, dst);
+                }
+                self.transfer_data.as_mut().unwrap().with_dst(dst);
+                self.transfer_data.as_mut().unwrap().src_paths = None; // protection against double-pasting
+            } // else the data has already been pasted somewhere => don't double-paste
+        }
+
         if self.yanked_path.is_some() {
             let yanked_ref = self.yanked_path.as_ref().unwrap();
 
@@ -359,13 +413,19 @@ impl System {
             self.copy(&src, &dst);
             self.yanked_path = None;
         }
+
         self.update_current();
     }
 
     pub fn yank_selected(&mut self) {
-        if self.context.current_path.is_some() {
-            self.yanked_path = Some(self.context.current_path.as_ref().unwrap().clone());
-        }
+        if self.context.current_path.is_none() { return; }
+        self.yanked_path = Some(self.context.current_path.as_ref().unwrap().clone());
+    }
+
+    pub fn cut_selected(&mut self) {
+        if self.context.current_path.is_none() { return; };
+        let paths = vec![self.context.current_path.as_ref().unwrap()];
+        self.transfer_data = Some(TransferData::new(paths));
     }
 
     fn remove(path: &PathBuf) {
@@ -379,10 +439,9 @@ impl System {
     }
 
     pub fn remove_selected(&mut self) {
-        if self.context.current_path.is_some() {
-            System::remove(self.context.current_path.as_ref().unwrap());
-            self.update_current();
-        }
+        if self.context.current_path.is_none() { return; }
+        System::remove(self.context.current_path.as_ref().unwrap());
+        self.update_current();
     }
 
     pub fn get_cumulative_size(&mut self) {

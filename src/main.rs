@@ -91,6 +91,7 @@ fn main() {
                         Command::Remove             => system.remove_selected(),
                         Command::Update             => system.update_current(),
                         Command::Yank               => system.yank_selected(),
+                        Command::Cut                => system.cut_selected(),
                         Command::Paste              => system.paste_into_current(),
                         Command::CumulativeSize     => system.get_cumulative_size(),
                     }

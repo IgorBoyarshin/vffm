@@ -15,6 +15,7 @@ pub enum Command {
     Right,
     Sort(SortingType),
     Remove,
+    Cut,
     Update,
     Yank,
     Paste,
@@ -50,6 +51,7 @@ pub fn generate_possible_inputs() -> Vec<(Combination, Command)> {
     inputs.push(("gt".to_string(), Command::GoTo("/home/igorek/Stuff")));
     inputs.push(("gm".to_string(), Command::GoTo("/home/igorek/Mutual")));
     inputs.push(("dd".to_string(), Command::Remove));
+    inputs.push(("dc".to_string(), Command::Cut));
     inputs.push(("yy".to_string(), Command::Yank));
     inputs.push(("pp".to_string(), Command::Paste));
     inputs.push(("u".to_string(), Command::Update));
@@ -68,7 +70,8 @@ pub fn description_of(command: &Command) -> String {
         Command::Sort(sorting_type) => format!("Sort entries {:?}", sorting_type),
         Command::Remove => "Remove selected entry(ies) from the filesystem".to_string(),
         Command::Update => "Update the current directory".to_string(),
-        Command::Yank => "Yank the current entry into buffer".to_string(),
+        Command::Yank => "Yank selected entries into buffer".to_string(),
+        Command::Cut => "Cut selected entries into buffer".to_string(),
         Command::Paste => "Paste the yanked entry into the current directory".to_string(),
         Command::CumulativeSize => "Calculate the cumulative size of current entry".to_string(),
     }
