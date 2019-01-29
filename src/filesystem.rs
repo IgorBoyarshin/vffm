@@ -259,7 +259,7 @@ fn size(path: &PathBuf) -> u64 {
 }
 
 pub fn cumulative_size(path: &PathBuf) -> u64 {
-    if path.is_dir() {
+    if path.symlink_metadata().unwrap().is_dir() {
         fs::read_dir(path).unwrap()
             .map(|entry| entry.unwrap().path())
             .map(|path| cumulative_size(&path))
