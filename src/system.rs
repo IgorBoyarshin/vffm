@@ -907,7 +907,7 @@ impl System {
 //-----------------------------------------------------------------------------
     fn maybe_truncate(string: &str, max_length: usize) -> String {
         let mut result = String::new();
-        let string = string.replace("\t", "    "); // assume tab_size=4
+        let string = string.replace("\r", "^M").replace("\t", "    "); // assume tab_size=4
         let mut chars = string.chars().take(max_length);
         while let Some(c) = chars.next() {
             result.push(c);
