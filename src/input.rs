@@ -18,6 +18,7 @@ pub enum Command {
     Update,
     Yank,
     Paste,
+    CumulativeSize,
     // NewTab,
     // CloseTab,
     // NextTab,
@@ -52,6 +53,7 @@ pub fn generate_possible_inputs() -> Vec<(Combination, Command)> {
     inputs.push(("yy".to_string(), Command::Yank));
     inputs.push(("pp".to_string(), Command::Paste));
     inputs.push(("u".to_string(), Command::Update));
+    inputs.push(("cs".to_string(), Command::CumulativeSize));
     inputs
 }
 
@@ -68,6 +70,7 @@ pub fn description_of(command: &Command) -> String {
         Command::Update => "Update the current directory".to_string(),
         Command::Yank => "Yank the current entry into buffer".to_string(),
         Command::Paste => "Paste the yanked entry into the current directory".to_string(),
+        Command::CumulativeSize => "Calculate the cumulative size of current entry".to_string(),
     }
 }
 

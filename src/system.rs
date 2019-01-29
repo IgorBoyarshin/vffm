@@ -67,9 +67,11 @@ pub struct System {
 
     yanked_path: Option<PathBuf>,
 
-    copy_process_handle:          Option<Child>,
-    copy_process_last_read_time : Option<SystemTime>,
-    copy_process_progress:        Option<String>,
+    copy_process_handle:         Option<Child>,
+    copy_process_last_read_time: Option<SystemTime>,
+    copy_process_progress:       Option<String>,
+
+    notification_text: Option<String>,
 }
 
 impl System {
@@ -95,6 +97,8 @@ impl System {
             copy_process_handle:         None,
             copy_process_last_read_time: None,
             copy_process_progress:       None,
+
+            notification_text: None,
         }
     }
 //-----------------------------------------------------------------------------
@@ -328,6 +332,11 @@ impl System {
         false
     }
 
+    // fn cut(&self, src: &str, dst: &str) {
+    //     copy_process_handle = Some(System::spawn_process_async("rsync",
+    //         vec!["-a", "-v", "-h", "--progress", src, dst]));
+    // }
+
     fn copy(&mut self, src: &str, dst: &str) {
         self.copy_process_handle = Some(System::spawn_process_async("rsync",
             vec!["-a", "-v", "-h", "--progress", src, dst]));
@@ -374,6 +383,12 @@ impl System {
             System::remove(self.context.current_path.as_ref().unwrap());
             self.update_current();
         }
+    }
+
+    pub fn get_cumulative_size(&mut self) {
+        if self.inside_empty_dir() { return }
+        let size = cumulative_size(self.context.current_path.as_ref().unwrap());
+        self.notification_text = Some("Size: ".to_string() + &System::human_size(size));
     }
 //-----------------------------------------------------------------------------
     pub fn sort_with(&mut self, new_sorting_type: SortingType) {
@@ -591,6 +606,7 @@ impl System {
     }
 
     fn common_up_down(&mut self) {
+        self.notification_text = None;
         self.update_last_part_of_current_path_by_index();
         self.context.current_permissions = self.get_current_permissions();
         self.context.right_column = self.collect_right_column_of_current();
@@ -599,6 +615,7 @@ impl System {
     }
 
     fn common_left_right(&mut self) {
+        self.notification_text = None;
         self.context.current_permissions = self.get_current_permissions();
         self.context.right_column = self.collect_right_column_of_current();
         self.context.current_siblings = self.collect_sorted_children_of_parent();
@@ -669,6 +686,7 @@ impl System {
 
     pub fn goto(&mut self, path: &str) {
         self.context.current_path = Some(PathBuf::from(path));
+        self.notification_text = None;
         self.update();
     }
 //-----------------------------------------------------------------------------
@@ -744,8 +762,17 @@ impl System {
         self.draw_current_size(&mut cs);
         self.draw_maybe_symlink_target(&mut cs);
         self.draw_copy_progress(&mut cs);
+        self.draw_notification(&mut cs);
 
         self.window.refresh();
+    }
+
+    fn draw_notification(&self, cs: &mut ColorSystem) {
+        if self.notification_text.is_some() {
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
+            mvprintw(&self.window, self.display_settings.height - 1, 30,
+                     self.notification_text.as_ref().unwrap());
+        }
     }
 
     fn draw_copy_progress(&self, cs: &mut ColorSystem) {

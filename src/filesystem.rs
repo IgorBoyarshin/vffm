@@ -252,6 +252,21 @@ fn into_entry(dir_entry: DirEntry) -> Entry {
     }
 }
 
+fn size(path: &PathBuf) -> u64 {
+    path.symlink_metadata()
+        .expect(&format!("Could not read metadata for {:?}", path))
+        .len()
+}
+
+pub fn cumulative_size(path: &PathBuf) -> u64 {
+    if path.is_dir() {
+        fs::read_dir(path).unwrap()
+            .map(|entry| entry.unwrap().path())
+            .map(|path| cumulative_size(&path))
+            .sum()
+    } else { size(path) }
+}
+
 // pub fn first_entry_inside(pathbuf: &PathBuf) -> Option<Entry> {
 //     let result = fs::read_dir(pathbuf)
 //         .expect(&format!("Could not read dir{}", pathbuf.to_str().expect("")))
