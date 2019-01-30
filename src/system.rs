@@ -15,38 +15,51 @@ use crate::input::*;
 
 type Millis = u128;
 //-----------------------------------------------------------------------------
-struct TransferData {
-    // None if the pasting has started (protection against double-pasting).
-    // Upon the end of pasting the TransferData itself will become None.
-    src_paths: Option<Vec<PathBuf>>,
-    src_sizes: Vec<Size>,
-    dst_paths: Option<Vec<PathBuf>>, // None if the pasting has not started yet
-    dst_sizes: Vec<Size>,
-    dst_finished: Vec<bool>,
+enum TransferType {
+    Yank,
+    Cut,
 }
 
-impl TransferData {
-    fn new(src_paths: Vec<&PathBuf>) -> TransferData {
-        let amount = src_paths.len();
+struct PotentialTransfer {
+    src_paths: Vec<PathBuf>,
+    src_sizes: Vec<Size>,
+    transfer_type: TransferType,
+}
+
+struct Transfer {
+    src_sizes: Vec<Size>,
+    dst_paths: Vec<PathBuf>,
+    dst_sizes: Vec<Option<Size>>,
+    transfer_type: TransferType,
+}
+
+impl PotentialTransfer {
+    fn cut(src_paths: Vec<&PathBuf>) -> PotentialTransfer {
+        PotentialTransfer::new(src_paths, TransferType::Cut)
+    }
+
+    fn yank(src_paths: Vec<&PathBuf>) -> PotentialTransfer {
+        PotentialTransfer::new(src_paths, TransferType::Yank)
+    }
+
+    fn new(src_paths: Vec<&PathBuf>, transfer_type: TransferType) -> PotentialTransfer {
         let src_sizes: Vec<Size> = src_paths.iter().map(|path| cumulative_size(&path)).collect();
-        let src_paths: Option<Vec<_>> = Some(src_paths.into_iter().map(|path| path.clone()).collect());
-        TransferData {
+        let src_paths: Vec<_> = src_paths.into_iter().map(|path| path.clone()).collect();
+        PotentialTransfer {
             src_paths,
             src_sizes,
-            dst_paths: None,
-            dst_sizes: vec![0; amount],
-            dst_finished: vec![false; amount],
+            transfer_type,
         }
     }
 
-    fn with_dst(&mut self, parent: &PathBuf) {
-        self.dst_paths = Some(self.src_paths.as_ref().unwrap().iter()
-            .map(|path| osstr_to_str(path.file_name().unwrap()))
-            .map(|name| {
-                let mut dst = parent.clone();
-                dst.push(name);
-                dst
-            }).collect());
+    fn with_dst_paths(self, dst_paths: Vec<PathBuf>) -> Transfer {
+        let amount = self.src_sizes.len();
+        Transfer {
+            src_sizes: self.src_sizes,
+            dst_sizes: vec![None; amount],
+            dst_paths,
+            transfer_type: self.transfer_type,
+        }
     }
 }
 
@@ -122,15 +135,11 @@ pub struct System {
     sorting_type: SortingType,
     spawn_patterns: Vec<SpawnPattern>, // const
 
-    // yanked_path: Option<PathBuf>,
-
-    // copy_process_handle:         Option<Child>,
-    // copy_process_last_read_time: Option<SystemTime>,
-    // copy_process_progress:       Option<String>,
-
     notification_text: Option<String>,
-    transfer_data:   Option<TransferData>,
     notification: Option<Notification>,
+
+    transfers: Vec<Transfer>,
+    potential_transfer_data: Option<PotentialTransfer>,
 }
 
 impl System {
@@ -152,15 +161,11 @@ impl System {
             sorting_type,
             spawn_patterns: System::generate_spawn_patterns(),
 
-            // yanked_path: None,
-            // copy_process_handle:         None,
-            // copy_process_last_read_time: None,
-            // copy_process_progress:       None,
-
             notification_text: None, // for CumulativeSize
-            notification: None,      // for Moving and Copying
+            notification: None,      // for Transfers
 
-            transfer_data:   None,
+            transfers: Vec::new(),
+            potential_transfer_data: None,
         }
     }
 //-----------------------------------------------------------------------------
@@ -364,28 +369,6 @@ impl System {
                 .status().expect("failed to execute process");
         }
     }
-
-    // fn spawn<S: AsRef<OsStr>>(app: &str, args: Vec<S>, separate_io: bool, wait_finish: bool) {
-    //     if separate_io {
-    //         if wait_finish {
-    //             Command::new(app).args(args)
-    //                 .stderr(Stdio::null()).stdout(Stdio::null())
-    //                 .status().expect("failed to execute process");
-    //         } else {
-    //             Command::new(app).args(args)
-    //                 .stderr(Stdio::null()).stdout(Stdio::null())
-    //                 .spawn().expect("failed to execute process");
-    //         }
-    //     } else {
-    //         if wait_finish {
-    //             Command::new(app).args(args)
-    //                 .status().expect("failed to execute process");
-    //         } else {
-    //             Command::new(app).args(args)
-    //                 .spawn().expect("failed to execute process");
-    //         }
-    //     }
-    // }
 //-----------------------------------------------------------------------------
     fn current_contains(&self, name: &str) -> bool {
         for entry in self.context.current_siblings.iter() {
@@ -394,59 +377,52 @@ impl System {
         false
     }
 
-    fn cut(src: &PathBuf, dst: &PathBuf) {
-        System::spawn_process_async("mv", vec![path_to_str(src), path_to_str(dst)]);
-        // System::set_drawing_delay(DrawingDelay::Copying);
+    fn cut(src: &str, dst: &str) {
+        System::spawn_process_async("mv", vec![src, dst]);
     }
 
-    // fn copy(&mut self, src: &str, dst: &str) {
-    //     self.copy_process_handle = Some(System::spawn_process_async("rsync",
-    //         vec!["-a", "-v", "-h", "--progress", src, dst]));
-    //     self.copy_process_last_read_time = None; // will be set after the first pipe read attempt
-    //     self.copy_process_progress = Some("Copying...".to_string());
-    //     System::set_drawing_delay(DrawingDelay::Copying);
-    // }
+    fn yank(src: &str, dst: &str) {
+        System::spawn_process_async("rsync", vec!["-a", "-v", "-h", src, dst]);
+    }
 
     pub fn paste_into_current(&mut self) {
-        if self.transfer_data.is_some() {
-            if self.transfer_data.as_ref().unwrap().src_paths.is_some() {
-                let dst = &self.context.parent_path;
-                for item in self.transfer_data.as_ref().unwrap()
-                                    .src_paths.as_ref().unwrap().iter() {
-                    System::cut(&item, dst);
+        if let Some(data) = self.potential_transfer_data.as_ref() {
+            let dst_paths: Vec<PathBuf> = data.src_paths.iter()
+                .map(|src_path| {
+                    let mut dst_name = file_name(src_path);
+                    while self.current_contains(&dst_name) { dst_name += "_"; }
+                    self.context.parent_path.join(dst_name)
+                }).collect();
+            for (src_path, dst_path) in data.src_paths.iter().zip(dst_paths.iter()) {
+                let mut src = path_to_string(src_path);
+                if is_dir(src_path) { src+= "/"; } // so that rsync works as we want
+
+                let dst = path_to_string(dst_path);
+                match data.transfer_type {
+                    TransferType::Cut  => System::cut(&src, &dst),
+                    TransferType::Yank => System::yank(&src, &dst),
                 }
-                self.transfer_data.as_mut().unwrap().with_dst(dst);
-                self.transfer_data.as_mut().unwrap().src_paths = None; // protection against double-pasting
-                System::set_drawing_delay(DrawingDelay::Copying);
-            } // else the data has already been pasted somewhere => don't double-paste
+            }
+            self.transfers.push(self.potential_transfer_data.take().unwrap().with_dst_paths(dst_paths));
+            System::set_drawing_delay(DrawingDelay::Transfering);
+            self.update_current();
         }
-
-        // if self.yanked_path.is_some() {
-        //     let yanked_ref = self.yanked_path.as_ref().unwrap();
-        //
-        //     let mut src = path_to_string(yanked_ref);
-        //     if is_dir(yanked_ref) { src += "/"; } // so that rsync works as we want
-        //
-        //     let mut target_name = file_name(yanked_ref);
-        //     while self.current_contains(&target_name) { target_name += "_"; }
-        //     let dst = path_to_string(&self.context.parent_path.join(target_name));
-        //
-        //     self.copy(&src, &dst);
-        //     self.yanked_path = None;
-        // }
-
-        self.update_current();
     }
 
+    // TODO: mb merge with cut_selected
     pub fn yank_selected(&mut self) {
-        // if self.context.current_path.is_none() { return; }
-        // self.yanked_path = Some(self.context.current_path.as_ref().unwrap().clone());
+        if let Some(path) = self.context.current_path.as_ref() {
+            let paths = vec![path];
+            self.potential_transfer_data = Some(PotentialTransfer::yank(paths));
+        }
     }
 
+    // TODO: mb merge with yank_selected
     pub fn cut_selected(&mut self) {
-        if self.context.current_path.is_none() { return; };
-        let paths = vec![self.context.current_path.as_ref().unwrap()];
-        self.transfer_data = Some(TransferData::new(paths));
+        if let Some(path) = self.context.current_path.as_ref() {
+            let paths = vec![path];
+            self.potential_transfer_data = Some(PotentialTransfer::cut(paths));
+        }
     }
 
     fn remove(path: &PathBuf) {
@@ -573,84 +549,46 @@ impl System {
     }
 
     fn update_transfer_progress(&mut self) {
-        if let Some(transfer_data) = self.transfer_data.as_mut() {
-            if let Some(dst_paths) = transfer_data.dst_paths.as_ref() {
-                let dst_sizes: Vec<Size> = dst_paths.iter()
-                    .zip(transfer_data.dst_sizes.iter())
-                    .zip(transfer_data.dst_finished.iter())
-                    .map(|((path, &size), &is_final)|
-                         if is_final { size } else { cumulative_size(path) })
-                    .collect();
-                for (index, &size) in dst_sizes.iter().enumerate() {
-                    let finished_this_one = size == transfer_data.src_sizes[index];
-                    if finished_this_one { // then cache for later
-                        transfer_data.dst_finished[index] = true;
-                        transfer_data.dst_sizes   [index] = size;
-                    }
+        for transfer in self.transfers.iter_mut() {
+            let dst_sizes: Vec<Size> = transfer.dst_paths.iter()
+                .zip(transfer.dst_sizes.iter())
+                .map(|(path, &size)|
+                     if let Some(size) = size { size } else { cumulative_size(path) })
+                .collect();
+            for (index, &size) in dst_sizes.iter().enumerate() {
+                let finished_this_one = size == transfer.src_sizes[index];
+                if finished_this_one { // then cache for later
+                    // transfer.dst_finished[index] = true;
+                    transfer.dst_sizes   [index] = Some(size);
                 }
-                let src_cumulative_size: Size = transfer_data.src_sizes.iter().sum();
-                let dst_cumulative_size: Size =               dst_sizes.iter().sum();
+            }
+            let src_cumulative_size: Size = transfer.src_sizes.iter().sum();
+            let dst_cumulative_size: Size =          dst_sizes.iter().sum();
 
-                if src_cumulative_size == dst_cumulative_size { // finished
-                    self.notification = Some(Notification::new("Done moving!", 3000));
-                    self.transfer_data = None;
-                    System::set_drawing_delay(DrawingDelay::Regular);
-                } else { // partially finished
-                    let percentage = (100 * dst_cumulative_size / src_cumulative_size) as u32;
-                    let text = format!("Moving...({}% done)", percentage);
-                    self.notification = Some(Notification::new(&text, 3000));
-                    System::set_drawing_delay(DrawingDelay::Copying);
-                }
-                self.update_current();
-            } // otherwise the pasting has not started yet => nothing to do
-        } // otherwise nothing has been even cut'ed yet
+            if src_cumulative_size == dst_cumulative_size { // finished
+                // Can remove this transfer now. Do it after this loop with retain()
+                let text = match transfer.transfer_type {
+                    TransferType::Cut => "Done moving!",
+                    TransferType::Yank => "Done copying!",
+                };
+                self.notification = Some(Notification::new(text, 3000));
+            } else { // partially finished
+                let percentage = (100 * dst_cumulative_size / src_cumulative_size) as u32;
+                let text = format!("Moving...({}% done)", percentage);
+                self.notification = Some(Notification::new(&text, 3000));
+                System::set_drawing_delay(DrawingDelay::Transfering);
+            }
+        }
+
+        // TODO: mb remove
+        if !self.transfers.is_empty() { self.update_current(); }
+
+        // Leave only the ones with uncompleted (None) sizes left
+        self.transfers.retain(|t| !t.dst_sizes.iter().all(|&size| size.is_some()));
+
+        // Slow down the pace
+        if self.transfers.is_empty() { System::set_drawing_delay(DrawingDelay::Regular); }
     }
-
-    // fn update_copy_progress(&mut self) {
-    //     if self.copy_process_handle.is_none() { // done with copying itself
-    //         if self.copy_process_last_read_time.is_some() { // still displaying
-    //             let last = self.copy_process_last_read_time.as_ref().unwrap().clone();
-    //             if millis_since(last) > self.settings.copy_done_notification_delay_ms {
-    //                 // Done displaying
-    //                 self.copy_process_last_read_time = None;
-    //                 self.copy_process_progress       = None;
-    //             } // else let display for some more time
-    //         }
-    //         return;
-    //     }
-    //
-    //     // Still copying
-    //     let handle = self.copy_process_handle.as_mut().unwrap();
-    //     if let Ok(Some(_status)) = handle.try_wait() { // process has exited
-    //         // Done copying
-    //         self.copy_process_handle         = None;
-    //         self.copy_process_last_read_time = Some(SystemTime::now()); // pivot for notification
-    //         self.copy_process_progress       = Some("Done copying!".to_string());
-    //         System::set_drawing_delay(DrawingDelay::Regular);
-    //     } else { // try to read copying progress
-    //         // Approx delay between subsequent updates in rsync's output:
-    //         let rsync_delay_millis = 1000;
-    //         let can_read = self.copy_process_last_read_time.is_none() || // first attempt to read
-    //             millis_since(self.copy_process_last_read_time.unwrap()) > rsync_delay_millis;
-    //         if can_read {
-    //             let mut it = handle.stdout.as_mut().unwrap().bytes();
-    //             let mut number = String::new();
-    //             while let Some(c) = it.next() { // may block!!
-    //                 let c = c.unwrap();
-    //                 if c == b'%' {
-    //                     let end = number.len();
-    //                     let start = end - 3;
-    //                     let percent = number.get(start..end).unwrap().to_string();
-    //                     let text = "Copying...(".to_string() + &percent + "% done)";
-    //                     self.copy_process_progress = Some(text);
-    //                     break; // done reading for now (probably there are no more '%' yet)
-    //                 } else { number.push(c as char); }
-    //             }
-    //             self.copy_process_last_read_time = Some(SystemTime::now()); // pivot for next attempt
-    //         } // else too early => don't try to read (to update)
-    //     }
-    //     self.update_current();
-    // }
 //-----------------------------------------------------------------------------
     fn collect_sorted_siblings_of_parent(&self) -> Vec<Entry> {
         System::sort(collect_siblings_of(&self.context.parent_path), &self.sorting_type)
@@ -872,7 +810,6 @@ impl System {
     pub fn draw(&mut self, mut cs: &mut ColorSystem) {
         self.clear(&mut cs);
 
-        // self.update_copy_progress();
         self.update_transfer_progress();
 
         self.draw_borders(&mut cs);
@@ -885,7 +822,6 @@ impl System {
         self.draw_current_size(&mut cs);
         self.maybe_draw_current_symlink_target(&mut cs);
 
-        // self.draw_copy_progress(&mut cs);
         self.draw_notification_text(&mut cs);
         self.update_and_draw_notification(&mut cs);
 
@@ -986,13 +922,6 @@ impl System {
             mvprintw(&self.window, self.display_settings.height - 1, 17, &text);
         }
     }
-
-    // fn draw_copy_progress(&self, cs: &mut ColorSystem) {
-    //     if let Some(text) = self.copy_process_progress.as_ref() {
-    //         cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-    //         mvprintw(&self.window, self.display_settings.height - 1, 20, text);
-    //     }
-    // }
 
     fn draw_notification_text(&self, cs: &mut ColorSystem) {
         if let Some(text) = self.notification_text.as_ref() {
@@ -1313,14 +1242,14 @@ impl RightColumn {
 }
 //-----------------------------------------------------------------------------
 enum DrawingDelay {
-    Copying,
+    Transfering,
     Regular,
 }
 
 impl DrawingDelay {
     fn ms(&self) -> i32 {
         match self {
-            DrawingDelay::Copying => 1000,
+            DrawingDelay::Transfering => 1000,
             DrawingDelay::Regular => 5000,
         }
     }
