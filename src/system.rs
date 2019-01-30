@@ -13,6 +13,7 @@ use crate::filesystem::*;
 use crate::input::*;
 
 
+type Millis = u128;
 //-----------------------------------------------------------------------------
 struct TransferData {
     // None if the pasting has started (protection against double-pasting).
@@ -43,10 +44,31 @@ impl TransferData {
         self.dst_paths = Some(self.src_paths.as_ref().unwrap().iter()
             .map(|path| osstr_to_str(path.file_name().unwrap()))
             .map(|name| {
-                let mut path = parent.clone();
-                path.set_file_name(name);
-                path
+                let mut dst = parent.clone();
+                dst.push(name);
+                dst
             }).collect());
+    }
+}
+
+struct Notification {
+    text: String,
+    show_time_millis: Millis,
+    start_time: SystemTime,
+}
+
+impl Notification {
+    fn new(text: &str, show_time_millis: Millis) -> Notification {
+        let text = text.to_string();
+        Notification {
+            text,
+            show_time_millis,
+            start_time: SystemTime::now(),
+        }
+    }
+
+    fn has_finished(&self) -> bool {
+        millis_since(self.start_time) > self.show_time_millis
     }
 }
 
@@ -60,7 +82,7 @@ pub struct Settings {
 
     pub columns_ratio: Vec<u32>,
     pub scrolling_gap: usize,
-    pub copy_done_notification_delay_ms: u128,
+    pub copy_done_notification_delay_ms: Millis,
 }
 
 struct DisplaySettings {
@@ -110,7 +132,8 @@ pub struct System {
     notification_text: Option<String>,
 
     transfer_data:   Option<TransferData>,
-    // transfer_handle: Option<Child>,
+
+    notification: Option<Notification>,
 }
 
 impl System {
@@ -138,6 +161,7 @@ impl System {
             copy_process_progress:       None,
 
             notification_text: None,
+            notification: None,
 
             transfer_data:   None,
             // transfer_handle: None,
@@ -376,7 +400,7 @@ impl System {
 
     fn cut(src: &PathBuf, dst: &PathBuf) {
         System::spawn_process_async("mv", vec![path_to_str(src), path_to_str(dst)]);
-        System::set_drawing_delay(DrawingDelay::Copying);
+        // System::set_drawing_delay(DrawingDelay::Copying);
     }
 
     fn copy(&mut self, src: &str, dst: &str) {
@@ -397,6 +421,7 @@ impl System {
                 }
                 self.transfer_data.as_mut().unwrap().with_dst(dst);
                 self.transfer_data.as_mut().unwrap().src_paths = None; // protection against double-pasting
+                System::set_drawing_delay(DrawingDelay::Copying);
             } // else the data has already been pasted somewhere => don't double-paste
         }
 
@@ -545,6 +570,39 @@ impl System {
         self.context.right_column = self.collect_right_column_of_current();
         self.context.current_permissions = self.get_current_permissions();
         self.context.current_siblings_shift = self.recalculate_current_siblings_shift();
+    }
+
+    fn update_transfer_progress(&mut self) {
+        if let Some(transfer_data) = self.transfer_data.as_mut() {
+            if let Some(dst_paths) = transfer_data.dst_paths.as_ref() {
+                let dst_sizes: Vec<Size> = dst_paths.iter()
+                    .zip(transfer_data.dst_sizes.iter())
+                    .zip(transfer_data.dst_finished.iter())
+                    .map(|((path, &size), &is_final)|
+                         if is_final { size } else { cumulative_size(path) })
+                    .collect();
+                for (index, &size) in dst_sizes.iter().enumerate() {
+                    let finished_this_one = size == transfer_data.src_sizes[index];
+                    if finished_this_one { // then cache for later
+                        transfer_data.dst_finished[index] = true;
+                        transfer_data.dst_sizes   [index] = size;
+                    }
+                }
+                let src_cumulative_size: Size = transfer_data.src_sizes.iter().sum();
+                let dst_cumulative_size: Size =               dst_sizes.iter().sum();
+
+                if src_cumulative_size == dst_cumulative_size { // finished
+                    self.notification = Some(Notification::new("Done moving!", 3000));
+                    self.transfer_data = None;
+                    System::set_drawing_delay(DrawingDelay::Regular);
+                } else { // partially finished
+                    let percentage = (100 * dst_cumulative_size / src_cumulative_size) as u32;
+                    let text = format!("Moving...({}% done)", percentage);
+                    self.notification = Some(Notification::new(&text, 3000));
+                    System::set_drawing_delay(DrawingDelay::Copying);
+                }
+            } // otherwise the pasting has not started yet => nothing to do
+        } // otherwise nothing has been even cut'ed yet
     }
 
     fn update_copy_progress(&mut self) {
@@ -809,6 +867,7 @@ impl System {
     pub fn draw(&mut self, mut cs: &mut ColorSystem) {
         self.update_current(); // TODO
         self.update_copy_progress();
+        self.update_transfer_progress();
 
         self.draw_borders(&mut cs);
 
@@ -821,15 +880,28 @@ impl System {
         self.draw_current_size(&mut cs);
         self.draw_maybe_symlink_target(&mut cs);
         self.draw_copy_progress(&mut cs);
-        self.draw_notification(&mut cs);
+        self.draw_notification_text(&mut cs);
+        self.update_and_draw_notification(&mut cs);
 
         self.window.refresh();
     }
 
-    fn draw_notification(&self, cs: &mut ColorSystem) {
+    fn update_and_draw_notification(&mut self, cs: &mut ColorSystem) {
+        if self.notification.is_none() { return; }
+        if self.notification.as_ref().unwrap().has_finished() {
+            self.notification = None;
+            return;
+        }
+
+        let text = &self.notification.as_ref().unwrap().text;
+        cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
+        mvprintw(&self.window, self.display_settings.height - 1, 31, text);
+    }
+
+    fn draw_notification_text(&self, cs: &mut ColorSystem) {
         if self.notification_text.is_some() {
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-            mvprintw(&self.window, self.display_settings.height - 1, 30,
+            mvprintw(&self.window, self.display_settings.height - 1, 24,
                      self.notification_text.as_ref().unwrap());
         }
     }
@@ -1150,7 +1222,7 @@ fn mvprintw(window: &Window, y: i32, x: i32, string: &str) -> i32 {
     printw(window, string)
 }
 
-fn millis_since(time: SystemTime) -> u128 {
+fn millis_since(time: SystemTime) -> Millis {
     let elapsed = SystemTime::now().duration_since(time);
     if elapsed.is_err() { return 0; } // _now_ is earlier than _time_ => assume 0
     elapsed.unwrap().as_millis()
@@ -1247,7 +1319,7 @@ impl DrawingDelay {
     fn ms(&self) -> i32 {
         match self {
             DrawingDelay::Copying => 1000,
-            DrawingDelay::Regular => 3000,
+            DrawingDelay::Regular => 5000,
         }
     }
 }
