@@ -26,7 +26,8 @@ pub enum Command {
     // PreviousTab,
 }
 
-pub type Matches<'a> = Vec<&'a (Combination, Command)>;
+pub type Match   = (Combination, Command);
+pub type Matches = Vec<Match>;
 
 pub const fn max_combination_len() -> usize { 5 }
 
@@ -77,20 +78,17 @@ pub fn description_of(command: &Command) -> String {
     }
 }
 
-pub fn combinations_that_start_with<'a>(slice: &str, array: Matches<'a>)
-        -> Vec<&'a (Combination, Command)> {
-    let mut combinations = Vec::new();
-    let str1 = slice.as_bytes();
-    let size = slice.len();
-    'entries: for entry in array {
-        let str2 = (&entry.0).as_bytes();
-        if size > str2.len() { continue 'entries; }
-        for i in 0..size {
-            if str1[i] != str2[i] { continue 'entries; }
+pub fn matches_that_start_with<'a>(slice: &str, array: &'a Matches) -> Vec<&'a Match> {
+    let mut matches = Vec::new();
+    for entry in array {
+        let combination = &entry.0;
+        if combination.starts_with(slice) {
+            matches.push(entry);
         }
-        // Complete match up to the size => take it
-        combinations.push(entry);
     }
-    combinations
+    matches
 }
 
+pub fn exact_match(matches: &Vec<&Match>, input: &str) -> bool {
+    (matches.len() == 1) && (matches[0].0 == input)
+}
