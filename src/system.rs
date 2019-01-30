@@ -30,7 +30,6 @@ impl TransferData {
         let amount = src_paths.len();
         let src_sizes: Vec<Size> = src_paths.iter().map(|path| cumulative_size(&path)).collect();
         let src_paths: Option<Vec<_>> = Some(src_paths.into_iter().map(|path| path.clone()).collect());
-        // let src_paths: Vec<String> = src_paths.into_iter().map(|path| path_to_string(&path)).collect();
         TransferData {
             src_paths,
             src_sizes,
@@ -123,16 +122,14 @@ pub struct System {
     sorting_type: SortingType,
     spawn_patterns: Vec<SpawnPattern>, // const
 
-    yanked_path: Option<PathBuf>,
+    // yanked_path: Option<PathBuf>,
 
-    copy_process_handle:         Option<Child>,
-    copy_process_last_read_time: Option<SystemTime>,
-    copy_process_progress:       Option<String>,
+    // copy_process_handle:         Option<Child>,
+    // copy_process_last_read_time: Option<SystemTime>,
+    // copy_process_progress:       Option<String>,
 
     notification_text: Option<String>,
-
     transfer_data:   Option<TransferData>,
-
     notification: Option<Notification>,
 }
 
@@ -154,17 +151,16 @@ impl System {
 
             sorting_type,
             spawn_patterns: System::generate_spawn_patterns(),
-            yanked_path: None,
 
-            copy_process_handle:         None,
-            copy_process_last_read_time: None,
-            copy_process_progress:       None,
+            // yanked_path: None,
+            // copy_process_handle:         None,
+            // copy_process_last_read_time: None,
+            // copy_process_progress:       None,
 
-            notification_text: None,
-            notification: None,
+            notification_text: None, // for CumulativeSize
+            notification: None,      // for Moving and Copying
 
             transfer_data:   None,
-            // transfer_handle: None,
         }
     }
 //-----------------------------------------------------------------------------
@@ -403,13 +399,13 @@ impl System {
         // System::set_drawing_delay(DrawingDelay::Copying);
     }
 
-    fn copy(&mut self, src: &str, dst: &str) {
-        self.copy_process_handle = Some(System::spawn_process_async("rsync",
-            vec!["-a", "-v", "-h", "--progress", src, dst]));
-        self.copy_process_last_read_time = None; // will be set after the first pipe read attempt
-        self.copy_process_progress = Some("Copying...".to_string());
-        System::set_drawing_delay(DrawingDelay::Copying);
-    }
+    // fn copy(&mut self, src: &str, dst: &str) {
+    //     self.copy_process_handle = Some(System::spawn_process_async("rsync",
+    //         vec!["-a", "-v", "-h", "--progress", src, dst]));
+    //     self.copy_process_last_read_time = None; // will be set after the first pipe read attempt
+    //     self.copy_process_progress = Some("Copying...".to_string());
+    //     System::set_drawing_delay(DrawingDelay::Copying);
+    // }
 
     pub fn paste_into_current(&mut self) {
         if self.transfer_data.is_some() {
@@ -425,26 +421,26 @@ impl System {
             } // else the data has already been pasted somewhere => don't double-paste
         }
 
-        if self.yanked_path.is_some() {
-            let yanked_ref = self.yanked_path.as_ref().unwrap();
-
-            let mut src = path_to_string(yanked_ref);
-            if is_dir(yanked_ref) { src += "/"; } // so that rsync works as we want
-
-            let mut target_name = file_name(yanked_ref);
-            while self.current_contains(&target_name) { target_name += "_"; }
-            let dst = path_to_string(&self.context.parent_path.join(target_name));
-
-            self.copy(&src, &dst);
-            self.yanked_path = None;
-        }
+        // if self.yanked_path.is_some() {
+        //     let yanked_ref = self.yanked_path.as_ref().unwrap();
+        //
+        //     let mut src = path_to_string(yanked_ref);
+        //     if is_dir(yanked_ref) { src += "/"; } // so that rsync works as we want
+        //
+        //     let mut target_name = file_name(yanked_ref);
+        //     while self.current_contains(&target_name) { target_name += "_"; }
+        //     let dst = path_to_string(&self.context.parent_path.join(target_name));
+        //
+        //     self.copy(&src, &dst);
+        //     self.yanked_path = None;
+        // }
 
         self.update_current();
     }
 
     pub fn yank_selected(&mut self) {
-        if self.context.current_path.is_none() { return; }
-        self.yanked_path = Some(self.context.current_path.as_ref().unwrap().clone());
+        // if self.context.current_path.is_none() { return; }
+        // self.yanked_path = Some(self.context.current_path.as_ref().unwrap().clone());
     }
 
     pub fn cut_selected(&mut self) {
@@ -610,55 +606,50 @@ impl System {
         } // otherwise nothing has been even cut'ed yet
     }
 
-    fn update_copy_progress(&mut self) {
-        if self.copy_process_handle.is_none() { // done with copying itself
-            if self.copy_process_last_read_time.is_some() { // still displaying
-                let last = self.copy_process_last_read_time.as_ref().unwrap().clone();
-                if millis_since(last) > self.settings.copy_done_notification_delay_ms {
-                    // Done displaying
-                    self.copy_process_last_read_time = None;
-                    self.copy_process_progress       = None;
-                } // else let display for some more time
-            }
-            return;
-        }
-
-        // Still copying
-        let handle = self.copy_process_handle.as_mut().unwrap();
-        if let Ok(Some(_status)) = handle.try_wait() { // process has exited
-            // Done copying
-            self.copy_process_handle         = None;
-            self.copy_process_last_read_time = Some(SystemTime::now()); // pivot for notification
-            self.copy_process_progress       = Some("Done copying!".to_string());
-            System::set_drawing_delay(DrawingDelay::Regular);
-        } else { // try to read copying progress
-            // Approx delay between subsequent updates in rsync's output:
-            let rsync_delay_millis = 1000;
-            let can_read = self.copy_process_last_read_time.is_none() || // first attempt to read
-                millis_since(self.copy_process_last_read_time.unwrap()) > rsync_delay_millis;
-            if can_read {
-                let mut it = handle.stdout.as_mut().unwrap().bytes();
-                let mut number = String::new();
-                while let Some(c) = it.next() { // may block!!
-                    let c = c.unwrap();
-                    if c == b'%' {
-                        let end = number.len();
-                        let start = end - 3;
-                        let percent = number.get(start..end).unwrap().to_string();
-                        let text = "Copying...(".to_string() + &percent + "% done)";
-                        self.copy_process_progress = Some(text);
-                        break; // done reading for now (probably there are no more '%' yet)
-                    } else { number.push(c as char); }
-                }
-                self.copy_process_last_read_time = Some(SystemTime::now()); // pivot for next attempt
-            } // else too early => don't try to read (to update)
-        }
-        self.update_current();
-    }
-
-    // Update current entry and right column
-    // fn update_current_entry(&self) {
+    // fn update_copy_progress(&mut self) {
+    //     if self.copy_process_handle.is_none() { // done with copying itself
+    //         if self.copy_process_last_read_time.is_some() { // still displaying
+    //             let last = self.copy_process_last_read_time.as_ref().unwrap().clone();
+    //             if millis_since(last) > self.settings.copy_done_notification_delay_ms {
+    //                 // Done displaying
+    //                 self.copy_process_last_read_time = None;
+    //                 self.copy_process_progress       = None;
+    //             } // else let display for some more time
+    //         }
+    //         return;
+    //     }
     //
+    //     // Still copying
+    //     let handle = self.copy_process_handle.as_mut().unwrap();
+    //     if let Ok(Some(_status)) = handle.try_wait() { // process has exited
+    //         // Done copying
+    //         self.copy_process_handle         = None;
+    //         self.copy_process_last_read_time = Some(SystemTime::now()); // pivot for notification
+    //         self.copy_process_progress       = Some("Done copying!".to_string());
+    //         System::set_drawing_delay(DrawingDelay::Regular);
+    //     } else { // try to read copying progress
+    //         // Approx delay between subsequent updates in rsync's output:
+    //         let rsync_delay_millis = 1000;
+    //         let can_read = self.copy_process_last_read_time.is_none() || // first attempt to read
+    //             millis_since(self.copy_process_last_read_time.unwrap()) > rsync_delay_millis;
+    //         if can_read {
+    //             let mut it = handle.stdout.as_mut().unwrap().bytes();
+    //             let mut number = String::new();
+    //             while let Some(c) = it.next() { // may block!!
+    //                 let c = c.unwrap();
+    //                 if c == b'%' {
+    //                     let end = number.len();
+    //                     let start = end - 3;
+    //                     let percent = number.get(start..end).unwrap().to_string();
+    //                     let text = "Copying...(".to_string() + &percent + "% done)";
+    //                     self.copy_process_progress = Some(text);
+    //                     break; // done reading for now (probably there are no more '%' yet)
+    //                 } else { number.push(c as char); }
+    //             }
+    //             self.copy_process_last_read_time = Some(SystemTime::now()); // pivot for next attempt
+    //         } // else too early => don't try to read (to update)
+    //     }
+    //     self.update_current();
     // }
 //-----------------------------------------------------------------------------
     fn collect_sorted_siblings_of_parent(&self) -> Vec<Entry> {
@@ -881,7 +872,7 @@ impl System {
     pub fn draw(&mut self, mut cs: &mut ColorSystem) {
         self.clear(&mut cs);
 
-        self.update_copy_progress();
+        // self.update_copy_progress();
         self.update_transfer_progress();
 
         self.draw_borders(&mut cs);
@@ -894,7 +885,7 @@ impl System {
         self.draw_current_size(&mut cs);
         self.maybe_draw_current_symlink_target(&mut cs);
 
-        self.draw_copy_progress(&mut cs);
+        // self.draw_copy_progress(&mut cs);
         self.draw_notification_text(&mut cs);
         self.update_and_draw_notification(&mut cs);
 
@@ -996,12 +987,12 @@ impl System {
         }
     }
 
-    fn draw_copy_progress(&self, cs: &mut ColorSystem) {
-        if let Some(text) = self.copy_process_progress.as_ref() {
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-            mvprintw(&self.window, self.display_settings.height - 1, 20, text);
-        }
-    }
+    // fn draw_copy_progress(&self, cs: &mut ColorSystem) {
+    //     if let Some(text) = self.copy_process_progress.as_ref() {
+    //         cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
+    //         mvprintw(&self.window, self.display_settings.height - 1, 20, text);
+    //     }
+    // }
 
     fn draw_notification_text(&self, cs: &mut ColorSystem) {
         if let Some(text) = self.notification_text.as_ref() {
