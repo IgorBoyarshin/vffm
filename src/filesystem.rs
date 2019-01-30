@@ -258,14 +258,22 @@ fn into_entry(dir_entry: DirEntry) -> Entry {
 
 pub type Size = u64;
 
+pub fn maybe_size(path: &PathBuf) -> Option<Size> {
+    let meta = path.symlink_metadata(); // does not follow symlinks
+    if meta.is_err() { return None; }
+    Some(meta.unwrap().len())
+}
+
 fn size(path: &PathBuf) -> Size {
-    path.symlink_metadata()
+    path.symlink_metadata() // does not follow symlinks
         .expect(&format!("Could not read metadata for {:?}", path))
         .len()
 }
 
 pub fn cumulative_size(path: &PathBuf) -> Size {
-    if path.symlink_metadata().unwrap().is_dir() {
+    let meta = path.symlink_metadata();
+    if meta.is_err() { return 0; }
+    if meta.unwrap().is_dir() { // does not follow symlinks
         fs::read_dir(path).unwrap()
             .map(|entry| entry.unwrap().path())
             .map(|path| cumulative_size(&path))

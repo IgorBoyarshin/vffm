@@ -73,7 +73,6 @@ impl Overseer {
 
     fn work(&mut self) {
         while !self.terminated {
-            self.system.clear(&mut self.color_system);
             self.system.draw(&mut self.color_system);
             self.maybe_draw_matches();
             self.handle_input();

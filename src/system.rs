@@ -520,7 +520,11 @@ impl System {
     // }
 
     fn unsafe_current_entry_ref(&self) -> &Entry {
-        &self.context.current_siblings[self.context.current_index]
+        self.context.current_siblings.get(self.context.current_index).unwrap()
+    }
+
+    fn unsafe_current_entry_mut(&mut self) -> &mut Entry {
+        self.context.current_siblings.get_mut(self.context.current_index).unwrap()
     }
 
     // fn current_is_dir(&self) -> bool {
@@ -564,7 +568,7 @@ impl System {
         self.context.current_index =
             if self.context.current_siblings.is_empty() { 0 } // reset for future
             else if self.context.current_index >= len   { len - 1 } // update to valid
-            else                                { self.context.current_index }; // leave old
+            else                                        { self.context.current_index }; // leave old
         self.context.current_path = System::path_of_nth_entry_inside(
             self.context.current_index, &self.context.parent_path, &self.context.current_siblings);
         self.context.right_column = self.collect_right_column_of_current();
@@ -601,6 +605,7 @@ impl System {
                     self.notification = Some(Notification::new(&text, 3000));
                     System::set_drawing_delay(DrawingDelay::Copying);
                 }
+                self.update_current();
             } // otherwise the pasting has not started yet => nothing to do
         } // otherwise nothing has been even cut'ed yet
     }
@@ -648,6 +653,7 @@ impl System {
                 self.copy_process_last_read_time = Some(SystemTime::now()); // pivot for next attempt
             } // else too early => don't try to read (to update)
         }
+        self.update_current();
     }
 
     // Update current entry and right column
@@ -655,13 +661,6 @@ impl System {
     //
     // }
 //-----------------------------------------------------------------------------
-    fn update_last_part_of_current_path_by_index(&mut self) {
-        let name = self.unsafe_current_entry_ref().name.clone();
-        self.context.current_path.as_mut().map(|path| {
-            (*path).set_file_name(name); // try_pop and then push(name)
-        });
-    }
-
     fn collect_sorted_siblings_of_parent(&self) -> Vec<Entry> {
         System::sort(collect_siblings_of(&self.context.parent_path), &self.sorting_type)
     }
@@ -712,23 +711,39 @@ impl System {
 
     fn recalculate_parent_siblings_shift(&mut self) -> usize {
         System::siblings_shift_for(
-            self.display_settings.scrolling_gap, self.display_settings.column_effective_height,
-            self.context.parent_index, self.context.parent_siblings.len(), None)
+            self.display_settings.scrolling_gap,
+            self.display_settings.column_effective_height,
+            self.context.parent_index,
+            self.context.parent_siblings.len(),
+            None)
     }
 
     fn recalculate_current_siblings_shift(&mut self) -> usize {
         System::siblings_shift_for(
-            self.display_settings.scrolling_gap, self.display_settings.column_effective_height,
-            self.context.current_index, self.context.current_siblings.len(), Some(self.context.current_siblings_shift))
+            self.display_settings.scrolling_gap,
+            self.display_settings.column_effective_height,
+            self.context.current_index,
+            self.context.current_siblings.len(),
+            Some(self.context.current_siblings_shift))
     }
 
-    fn common_up_down(&mut self) {
+    fn update_current_entry_by_index(&mut self) {
         self.notification_text = None;
         self.update_last_part_of_current_path_by_index();
         self.context.current_permissions = self.get_current_permissions();
         self.context.right_column = self.collect_right_column_of_current();
         self.context.current_siblings_shift = self.recalculate_current_siblings_shift();
         self.context.symlink_target = self.get_symlink_target_for_current();
+        if let Some(new_size) = maybe_size(self.context.current_path.as_ref().unwrap()) {
+            self.unsafe_current_entry_mut().size = new_size;
+        }
+    }
+
+    fn update_last_part_of_current_path_by_index(&mut self) {
+        let name = self.unsafe_current_entry_ref().name.clone();
+        self.context.current_path.as_mut().map(|path| {
+            (*path).set_file_name(name); // try_pop + push(name)
+        });
     }
 
     fn common_left_right(&mut self) {
@@ -744,7 +759,7 @@ impl System {
         if self.inside_empty_dir() { return }
         if self.context.current_index > 0 {
             self.context.current_index -= 1;
-            self.common_up_down();
+            self.update_current_entry_by_index();
         }
     }
 
@@ -752,7 +767,7 @@ impl System {
         if self.inside_empty_dir() { return }
         if self.context.current_index < self.context.current_siblings.len() - 1 {
             self.context.current_index += 1;
-            self.common_up_down();
+            self.update_current_entry_by_index();
         }
     }
 
@@ -855,22 +870,21 @@ impl System {
         }
     }
 //-----------------------------------------------------------------------------
-    pub fn clear(&self, cs: &mut ColorSystem) {
+    fn clear(&self, cs: &mut ColorSystem) {
         cs.set_paint(&self.window, self.settings.primary_paint);
         for y in 0..self.display_settings.height {
             self.window.mv(y, 0);
             self.window.hline(' ', self.display_settings.width);
         }
-        self.window.refresh();
     }
 
     pub fn draw(&mut self, mut cs: &mut ColorSystem) {
-        self.update_current(); // TODO
+        self.clear(&mut cs);
+
         self.update_copy_progress();
         self.update_transfer_progress();
 
         self.draw_borders(&mut cs);
-
         self.draw_left_column(&mut cs);
         self.draw_middle_column(&mut cs);
         self.draw_right_column(&mut cs);
@@ -878,7 +892,8 @@ impl System {
         self.draw_current_path(&mut cs);
         self.draw_current_permission(&mut cs);
         self.draw_current_size(&mut cs);
-        self.draw_maybe_symlink_target(&mut cs);
+        self.maybe_draw_current_symlink_target(&mut cs);
+
         self.draw_copy_progress(&mut cs);
         self.draw_notification_text(&mut cs);
         self.update_and_draw_notification(&mut cs);
@@ -886,100 +901,32 @@ impl System {
         self.window.refresh();
     }
 
-    fn update_and_draw_notification(&mut self, cs: &mut ColorSystem) {
-        if self.notification.is_none() { return; }
-        if self.notification.as_ref().unwrap().has_finished() {
-            self.notification = None;
-            return;
+    fn draw_borders(&self, color_system: &mut ColorSystem) {
+        color_system.set_paint(&self.window, self.settings.primary_paint);
+        let (width, height) = (self.display_settings.width, self.display_settings.height);
+
+        self.window.mv(1, 0);
+        self.window.addch(ACS_ULCORNER());
+        self.window.hline(ACS_HLINE(), width - 2);
+        self.window.mv(1, width - 1);
+        self.window.addch(ACS_URCORNER());
+
+        self.window.mv(height - 2, 0);
+        self.window.addch(ACS_LLCORNER());
+        self.window.hline(ACS_HLINE(), width - 2);
+        self.window.mv(height - 2, width-1);
+        self.window.addch(ACS_LRCORNER());
+
+        for y in 2..height-2 {
+            self.window.mv(y, 0);
+            self.window.addch(ACS_VLINE());
+            self.window.mv(y, width - 1);
+            self.window.addch(ACS_VLINE());
         }
 
-        let text = &self.notification.as_ref().unwrap().text;
-        cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-        mvprintw(&self.window, self.display_settings.height - 1, 31, text);
-    }
-
-    fn draw_notification_text(&self, cs: &mut ColorSystem) {
-        if self.notification_text.is_some() {
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-            mvprintw(&self.window, self.display_settings.height - 1, 24,
-                     self.notification_text.as_ref().unwrap());
-        }
-    }
-
-    fn draw_copy_progress(&self, cs: &mut ColorSystem) {
-        if self.copy_process_progress.is_some() {
-            let text = self.copy_process_progress.as_ref().unwrap();
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-            mvprintw(&self.window, self.display_settings.height - 1, 20, text);
-        }
-    }
-
-    pub fn draw_available_matches(&self, cs: &mut ColorSystem,
-            matches: &Vec<&Match>, completion_count: usize) {
-        if matches.is_empty() { return; }
-
-        // Borders
-        cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-        let y = self.display_settings.height - 2 - matches.len() as i32 - 1;
-        self.window.mv(y, 0);
-        self.window.hline(ACS_HLINE(), self.display_settings.width);
-        self.window.mv(self.display_settings.height - 2, 0);
-        self.window.hline(ACS_HLINE(), self.display_settings.width);
-
-        let max_len = max_combination_len() as i32;
-        for (i, (combination, command)) in matches.iter().enumerate() {
-            let y = y + 1 + i as i32;
-
-            // Combination
-            let (completed_part, uncompleted_part) = combination.split_at(completion_count);
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default).bold());
-            mvprintw(&self.window, y, 0, &completed_part);
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-            printw(  &self.window,       &uncompleted_part);
-
-            // Space till description
-            let left = max_len - combination.len() as i32;
-            self.window.hline(' ', left);
-
-            // Command description
-            let description = description_of(&command);
-            mvprintw(&self.window, y, max_len as i32, &description);
-
-            // Space till end
-            let left = self.display_settings.width - max_len - description.len() as i32;
-            self.window.hline(' ', left);
-        }
-    }
-
-    fn draw_current_size(&self, cs: &mut ColorSystem) {
-        if self.context.current_path.is_some() {
-            let size = System::human_size(self.unsafe_current_entry_ref().size);
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Blue, Color::Default));
-            mvprintw(&self.window, self.display_settings.height - 1, 12, &size);
-        }
-    }
-
-    fn draw_current_path(&self, cs: &mut ColorSystem) {
-        if !self.inside_empty_dir() {
-            let path = self.context.current_path.as_ref().unwrap().to_str().unwrap();
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
-            mvprintw(&self.window, 0, 0, path);
-        }
-    }
-
-    fn draw_current_permission(&self, cs: &mut ColorSystem) {
-        if self.context.current_path.is_some() {
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
-            mvprintw(&self.window, self.display_settings.height - 1, 0, &self.context.current_permissions);
-        }
-    }
-
-    fn draw_maybe_symlink_target(&self, cs: &mut ColorSystem) {
-        if self.context.symlink_target.is_some() {
-            let target = self.context.symlink_target.as_ref().unwrap();
-            let text = "-> ".to_string() + target;
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
-            mvprintw(&self.window, self.display_settings.height - 1, 17, &text);
+        // For columns
+        for (start, _end) in self.display_settings.columns_coord.iter().skip(1) {
+            self.draw_column(color_system, *start);
         }
     }
 
@@ -1018,6 +965,99 @@ impl System {
         } // display nothing otherwise
     }
 
+    fn draw_current_path(&self, cs: &mut ColorSystem) {
+        if !self.inside_empty_dir() {
+            let path = self.context.current_path.as_ref().unwrap().to_str().unwrap();
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
+            mvprintw(&self.window, 0, 0, path);
+        }
+    }
+
+    fn draw_current_permission(&self, cs: &mut ColorSystem) {
+        if self.context.current_path.is_some() {
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
+            mvprintw(&self.window, self.display_settings.height - 1, 0, &self.context.current_permissions);
+        }
+    }
+
+    fn draw_current_size(&self, cs: &mut ColorSystem) {
+        if self.context.current_path.is_some() {
+            let size = System::human_size(self.unsafe_current_entry_ref().size);
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Blue, Color::Default));
+            mvprintw(&self.window, self.display_settings.height - 1, 12, &size);
+        }
+    }
+
+    fn maybe_draw_current_symlink_target(&self, cs: &mut ColorSystem) {
+        if let Some(target) = self.context.symlink_target.as_ref() {
+            let text = "-> ".to_string() + target;
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
+            mvprintw(&self.window, self.display_settings.height - 1, 17, &text);
+        }
+    }
+
+    fn draw_copy_progress(&self, cs: &mut ColorSystem) {
+        if let Some(text) = self.copy_process_progress.as_ref() {
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
+            mvprintw(&self.window, self.display_settings.height - 1, 20, text);
+        }
+    }
+
+    fn draw_notification_text(&self, cs: &mut ColorSystem) {
+        if let Some(text) = self.notification_text.as_ref() {
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
+            mvprintw(&self.window, self.display_settings.height - 1, 24, text);
+        }
+    }
+
+    fn update_and_draw_notification(&mut self, cs: &mut ColorSystem) {
+        if let Some(notification) = self.notification.as_ref() {
+            if notification.has_finished() {
+                self.notification = None;
+            } else {
+                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
+                mvprintw(&self.window, self.display_settings.height - 1, 31, &notification.text);
+            }
+        }
+    }
+//-----------------------------------------------------------------------------
+    pub fn draw_available_matches(&self, cs: &mut ColorSystem,
+            matches: &Vec<&Match>, completion_count: usize) {
+        if matches.is_empty() { return; }
+
+        // Borders
+        cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
+        let y = self.display_settings.height - 2 - matches.len() as i32 - 1;
+        self.window.mv(y, 0);
+        self.window.hline(ACS_HLINE(), self.display_settings.width);
+        self.window.mv(self.display_settings.height - 2, 0);
+        self.window.hline(ACS_HLINE(), self.display_settings.width);
+
+        let max_len = max_combination_len() as i32;
+        for (i, (combination, command)) in matches.iter().enumerate() {
+            let y = y + 1 + i as i32;
+
+            // Combination
+            let (completed_part, uncompleted_part) = combination.split_at(completion_count);
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default).bold());
+            mvprintw(&self.window, y, 0, &completed_part);
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
+            printw(  &self.window,       &uncompleted_part);
+
+            // Space till description
+            let left = max_len - combination.len() as i32;
+            self.window.hline(' ', left);
+
+            // Command description
+            let description = description_of(&command);
+            mvprintw(&self.window, y, max_len as i32, &description);
+
+            // Space till end
+            let left = self.display_settings.width - max_len - description.len() as i32;
+            self.window.hline(' ', left);
+        }
+    }
+
     fn draw_empty_sign(&self, cs: &mut ColorSystem, column_index: usize) {
         cs.set_paint(&self.window, Paint::with_fg_bg(Color::Black, Color::Red).bold());
         let (begin, _) = self.display_settings.columns_coord[column_index];
@@ -1032,35 +1072,6 @@ impl System {
         self.window.vline(ACS_VLINE(), self.display_settings.height-4);
         self.window.mv(self.display_settings.height-2, x);
         self.window.addch(ACS_BTEE());
-    }
-
-    fn draw_borders(&self, color_system: &mut ColorSystem) {
-        color_system.set_paint(&self.window, self.settings.primary_paint);
-        let (width, height) = (self.display_settings.width, self.display_settings.height);
-
-        self.window.mv(1, 0);
-        self.window.addch(ACS_ULCORNER());
-        self.window.hline(ACS_HLINE(), width - 2);
-        self.window.mv(1, width - 1);
-        self.window.addch(ACS_URCORNER());
-
-        self.window.mv(height - 2, 0);
-        self.window.addch(ACS_LLCORNER());
-        self.window.hline(ACS_HLINE(), width - 2);
-        self.window.mv(height - 2, width-1);
-        self.window.addch(ACS_LRCORNER());
-
-        for y in 2..height-2 {
-            self.window.mv(y, 0);
-            self.window.addch(ACS_VLINE());
-            self.window.mv(y, width - 1);
-            self.window.addch(ACS_VLINE());
-        }
-
-        // For columns
-        for (start, _end) in self.display_settings.columns_coord.iter().skip(1) {
-            self.draw_column(color_system, *start);
-        }
     }
 //-----------------------------------------------------------------------------
     fn maybe_truncate(string: &str, max_length: usize) -> String {
