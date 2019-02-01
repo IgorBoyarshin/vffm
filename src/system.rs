@@ -13,7 +13,54 @@ use crate::filesystem::*;
 use crate::input::*;
 
 
-type Millis = u128;
+//-----------------------------------------------------------------------------
+struct Bar {
+    y: Coord,
+    ready_left: Coord, // first x Coord of a not-taken cell from the left
+    ready_right: Coord, // first x Coord of a not-taken cell from the right
+}
+
+impl Bar {
+    fn draw_left(&mut self, window: &Window, text: &str, padding: Coord) {
+        let len = text.len();
+        let free = self.free_space();
+        if len > free {
+            let mut copy = text.to_string().clone();
+            copy.truncate(free);
+            mvprintw(window, self.y, self.ready_left, &copy);
+            self.ready_left += free as Coord + padding;
+        } else {
+            mvprintw(window, self.y, self.ready_left, &text);
+            self.ready_left += len as Coord + padding;
+        }
+    }
+
+    fn draw_right(&mut self, window: &Window, text: &str, padding: Coord) {
+        let len = text.len();
+        let free = self.free_space();
+        if len > free {
+            let mut copy = text.to_string().clone();
+            copy.truncate(free);
+            mvprintw(window, self.y, self.ready_left, &copy);
+            self.ready_right -= free as Coord + padding;
+        } else {
+            mvprintw(window, self.y, self.ready_left, &text);
+            self.ready_right -= len as Coord + padding;
+        }
+    }
+
+    fn free_space(&self) -> usize {
+        (self.ready_right - self.ready_left + 1) as usize
+    }
+
+    fn with_y_and_width(y: Coord, width: Coord) -> Bar {
+        Bar {
+            y,
+            ready_left: 0,
+            ready_right: width - 1,
+        }
+    }
+}
 //-----------------------------------------------------------------------------
 enum TransferType {
     Yank,
@@ -62,6 +109,8 @@ impl PotentialTransfer {
         }
     }
 }
+//-----------------------------------------------------------------------------
+type Millis = u128;
 
 struct Notification {
     text: String,
@@ -83,7 +132,7 @@ impl Notification {
         millis_since(self.start_time) > self.show_time_millis
     }
 }
-
+//-----------------------------------------------------------------------------
 pub struct Settings {
     pub primary_paint: Paint,
     pub dir_paint: Paint,
@@ -124,7 +173,7 @@ struct Context {
     current_permissions: String,
     additional_entry_info: Option<String>,
 }
-
+//-----------------------------------------------------------------------------
 pub struct System {
     window: Window,
     settings: Settings,
@@ -850,12 +899,14 @@ impl System {
         self.draw_right_column(&mut cs);
 
         self.draw_current_path(&mut cs);
-        self.draw_current_permission(&mut cs);
-        self.draw_current_size(&mut cs);
-        self.maybe_draw_additional_info_for_current(&mut cs);
 
-        self.draw_notification_text(&mut cs);
-        self.update_and_draw_notification(&mut cs);
+        let mut bottom_bar = Bar::with_y_and_width(
+            self.display_settings.height - 1, self.display_settings.width);
+        self.draw_current_permission(&mut cs, &mut bottom_bar);
+        self.draw_current_size(&mut cs, &mut bottom_bar);
+        self.maybe_draw_additional_info_for_current(&mut cs, &mut bottom_bar);
+        self.draw_notification_text(&mut cs, &mut bottom_bar);
+        self.update_and_draw_notification(&mut cs, &mut bottom_bar);
 
         self.window.refresh();
     }
@@ -932,42 +983,42 @@ impl System {
         }
     }
 
-    fn draw_current_permission(&self, cs: &mut ColorSystem) {
+    fn draw_current_permission(&self, cs: &mut ColorSystem, bar: &mut Bar) {
         if self.context.current_path.is_some() {
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
-            mvprintw(&self.window, self.display_settings.height - 1, 0, &self.context.current_permissions);
+            bar.draw_left(&self.window, &self.context.current_permissions, 2);
         }
     }
 
-    fn draw_current_size(&self, cs: &mut ColorSystem) {
+    fn draw_current_size(&self, cs: &mut ColorSystem, bar: &mut Bar) {
         if self.context.current_path.is_some() {
             let size = System::human_size(self.unsafe_current_entry_ref().size);
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::Blue, Color::Default));
-            mvprintw(&self.window, self.display_settings.height - 1, 12, &size);
+            bar.draw_left(&self.window, &size, 2);
         }
     }
 
-    fn maybe_draw_additional_info_for_current(&self, cs: &mut ColorSystem) {
+    fn maybe_draw_additional_info_for_current(&self, cs: &mut ColorSystem, bar: &mut Bar) {
         if let Some(info) = self.context.additional_entry_info.as_ref() {
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
-            mvprintw(&self.window, self.display_settings.height - 1, 17, &info);
+            bar.draw_left(&self.window, &info, 2);
         }
     }
 
-    fn draw_notification_text(&self, cs: &mut ColorSystem) {
+    fn draw_notification_text(&self, cs: &mut ColorSystem, bar: &mut Bar) {
         if let Some(text) = self.notification_text.as_ref() {
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-            mvprintw(&self.window, self.display_settings.height - 1, 24, text);
+            bar.draw_left(&self.window, text, 2);
         }
     }
 
-    fn update_and_draw_notification(&mut self, cs: &mut ColorSystem) {
+    fn update_and_draw_notification(&mut self, cs: &mut ColorSystem, bar: &mut Bar) {
         if let Some(notification) = self.notification.as_ref() {
             if notification.has_finished() {
                 self.notification = None;
             } else {
                 cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-                mvprintw(&self.window, self.display_settings.height - 1, 31, &notification.text);
+                bar.draw_left(&self.window, &notification.text, 2);
             }
         }
     }
