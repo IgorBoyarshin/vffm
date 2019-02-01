@@ -227,7 +227,7 @@ impl System {
 
     fn generate_context(starting_path: PathBuf, display_settings: &DisplaySettings,
             sorting_type: &SortingType) -> Context {
-        let current_siblings = System::sort(collect_maybe_dir(&starting_path), sorting_type);
+        let current_siblings = System::sort(collect_maybe_dir(&starting_path, None), sorting_type);
         let parent_siblings = System::sort(collect_siblings_of(&starting_path), sorting_type);
         let first_entry_path =
             System::path_of_nth_entry_inside(0, &starting_path, &current_siblings);
@@ -309,7 +309,7 @@ impl System {
         if let Some(path) = path_opt {
             if path.is_dir() { // resolved path
                 return RightColumn::with_siblings(
-                    System::collect_sorted_children_of(path_opt, sorting_type));
+                    System::collect_sorted_children_of(path_opt, sorting_type, max_height));
             } else { // resolved path is a regular file
                 let path = maybe_resolve_symlink_recursively(path);
                 if let Some(preview) = System::read_preview_of(&path, max_height) {
@@ -697,9 +697,10 @@ impl System {
     }
 
     // TODO: mb get rid of Option
-    fn collect_sorted_children_of(path: &Option<PathBuf>, sorting_type: &SortingType) -> Vec<Entry> {
+    fn collect_sorted_children_of(path: &Option<PathBuf>, sorting_type: &SortingType,
+                                  max_count: usize) -> Vec<Entry> {
         if let Some(path) = path {
-            System::sort(collect_maybe_dir(&path), sorting_type)
+            System::sort(collect_maybe_dir(&path, Some(max_count)), sorting_type)
         } else { Vec::new() }
     }
 
@@ -708,7 +709,7 @@ impl System {
     // }
 
     fn collect_sorted_children_of_parent(&self) -> Vec<Entry> {
-        System::sort(collect_maybe_dir(&self.context.parent_path), &self.sorting_type)
+        System::sort(collect_maybe_dir(&self.context.parent_path, None), &self.sorting_type)
     }
 
     // The display is guaranteed to be able to contain 2*gap (accomplished in settings)

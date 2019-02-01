@@ -200,19 +200,22 @@ pub fn maybe_resolve_symlink_recursively(path: &PathBuf) -> PathBuf {
 }
 
 // Follows the symlinks
-pub fn collect_maybe_dir(path: &PathBuf) -> Vec<Entry> {
+pub fn collect_maybe_dir(path: &PathBuf, max_count: Option<usize>) -> Vec<Entry> {
     let mut vec = Vec::new();
     if path.is_file() { return vec; }
     if !path.is_dir() { // so it is a symlink
         let new_path = path.read_link().expect("Somewhy not a symlink");
-        return collect_maybe_dir(&new_path);
+        return collect_maybe_dir(&new_path, max_count);
     } // otherwise it is a directory
     let entries = fs::read_dir(path);
     if !entries.is_ok() { return Vec::new(); }
     let entries = entries.expect(&format!("Could not read dir{:?}", path));
-    for entry in entries {
+    for (index, entry) in entries.enumerate() {
         let dir_entry = entry.expect("Could not retrieve entry");
         vec.push(into_entry(dir_entry));
+        if let Some(max_count) = max_count {
+            if index > max_count { break; }
+        }
     }
 
     vec
@@ -229,7 +232,7 @@ pub fn collect_siblings_of(path: &PathBuf) -> Vec<Entry> {
     } else {
         let mut path = path.clone();
         path.pop();
-        collect_maybe_dir(&path)
+        collect_maybe_dir(&path, None)
     }
 }
 
