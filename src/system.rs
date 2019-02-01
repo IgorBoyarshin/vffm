@@ -742,9 +742,9 @@ impl System {
             }
             self.context.parent_path.pop();
 
+            self.context.current_index = self.context.parent_index;
             self.common_left_right();
 
-            self.context.current_index = self.context.parent_index;
             self.context.parent_index = System::index_of_entry_inside(
                 &self.context.parent_path, &self.context.parent_siblings).unwrap();
             self.context.current_siblings_shift = self.context.parent_siblings_shift;
@@ -762,12 +762,11 @@ impl System {
             self.context.current_path = System::path_of_nth_entry_inside(
                 0, current_path_ref, self.context.right_column.siblings_ref().unwrap());
 
-            self.common_left_right();
-
             self.context.parent_index = self.context.current_index;
             self.context.current_index = 0;
             self.context.parent_siblings_shift = self.context.current_siblings_shift;
             self.context.current_siblings_shift = 0;
+            self.common_left_right();
         } else { // Resolved path points to a file
             // Try to open with default app
             let path = maybe_resolve_symlink_recursively(current_path_ref);
