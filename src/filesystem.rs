@@ -131,7 +131,9 @@ impl Entry {
 }
 
 pub fn read_lines(path: &PathBuf, amount: usize, max_bytes: u64) -> Vec<String> {
-    let file = File::open(path).expect("Could not read file");
+    let file = File::open(path);
+    if file.is_err() { return Vec::new(); }
+    let file = file.unwrap();
     let mut reader = BufReader::new(file).take(max_bytes);
     let mut lines = Vec::new();
     for _ in 0..amount {
