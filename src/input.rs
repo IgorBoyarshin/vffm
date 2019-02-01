@@ -85,7 +85,7 @@ pub fn description_of(command: &Command) -> String {
         Command::CumulativeSize => "Calculate the cumulative size of current entry".to_string(),
         Command::SelectUnderCursor => "Flips the selection for the entry under cursor".to_string(),
         Command::InvertSelection => "Inverts the selection in the current directory".to_string(),
-        Command::ClearSelection => "Clears the list of selected items".to_string(),
+        Command::ClearSelection => "Clears the list of selected items and the buffer of yanked or cut items".to_string(),
     }
 }
 

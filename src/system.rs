@@ -81,17 +81,16 @@ struct Transfer {
 }
 
 impl PotentialTransfer {
-    fn cut(src_paths: Vec<&PathBuf>) -> PotentialTransfer {
+    fn cut(src_paths: Vec<PathBuf>) -> PotentialTransfer {
         PotentialTransfer::new(src_paths, TransferType::Cut)
     }
 
-    fn yank(src_paths: Vec<&PathBuf>) -> PotentialTransfer {
+    fn yank(src_paths: Vec<PathBuf>) -> PotentialTransfer {
         PotentialTransfer::new(src_paths, TransferType::Yank)
     }
 
-    fn new(src_paths: Vec<&PathBuf>, transfer_type: TransferType) -> PotentialTransfer {
+    fn new(src_paths: Vec<PathBuf>, transfer_type: TransferType) -> PotentialTransfer {
         let src_sizes: Vec<Size> = src_paths.iter().map(|path| cumulative_size(&path)).collect();
-        let src_paths: Vec<_> = src_paths.into_iter().map(|path| path.clone()).collect();
         PotentialTransfer {
             src_paths,
             src_sizes,
@@ -467,18 +466,39 @@ impl System {
 
     // TODO: mb merge with cut_selected
     pub fn yank_selected(&mut self) {
-        if let Some(path) = self.context.current_path.as_ref() {
-            let paths = vec![path];
-            self.potential_transfer_data = Some(PotentialTransfer::yank(paths));
+        if self.selected.is_empty() {
+            if let Some(path) = self.context.current_path.as_ref() {
+                self.potential_transfer_data = Some(PotentialTransfer::yank(vec![path.clone()]));
+            }
+        } else {
+            let selected = self.selected.drain(..).collect();
+            self.potential_transfer_data = Some(PotentialTransfer::yank(selected));
         }
     }
 
     // TODO: mb merge with yank_selected
     pub fn cut_selected(&mut self) {
-        if let Some(path) = self.context.current_path.as_ref() {
-            let paths = vec![path];
-            self.potential_transfer_data = Some(PotentialTransfer::cut(paths));
+        if self.selected.is_empty() {
+            if let Some(path) = self.context.current_path.as_ref() {
+                self.potential_transfer_data = Some(PotentialTransfer::cut(vec![path.clone()]));
+            }
+        } else {
+            let selected = self.selected.drain(..).collect();
+            self.potential_transfer_data = Some(PotentialTransfer::cut(selected));
         }
+    }
+
+    pub fn remove_selected(&mut self) {
+        if self.selected.is_empty() {
+            if let Some(path) = self.context.current_path.as_ref() {
+                System::remove(path);
+            }
+        } else {
+            for item in self.selected.drain(..) {
+                System::remove(&item);
+            }
+        }
+        self.update_current();
     }
 
     fn remove(path: &PathBuf) {
@@ -489,12 +509,6 @@ impl System {
         } else { // is symlink
             System::spawn_process_wait("unlink", vec![path_to_str(path)]);
         }
-    }
-
-    pub fn remove_selected(&mut self) {
-        if self.context.current_path.is_none() { return; }
-        System::remove(self.context.current_path.as_ref().unwrap());
-        self.update_current();
     }
 
     pub fn get_cumulative_size(&mut self) {
@@ -635,6 +649,7 @@ impl System {
     }
 
     fn update_transfer_progress(&mut self) {
+        let mut finished_some = false;
         for transfer in self.transfers.iter_mut() {
             let dst_sizes: Vec<Size> = transfer.dst_paths.iter()
                 .zip(transfer.dst_sizes.iter())
@@ -658,6 +673,7 @@ impl System {
                     TransferType::Yank => "Done copying!",
                 };
                 self.notification = Some(Notification::new(text, 3000));
+                finished_some = true;
             } else { // partially finished
                 let percentage = (100 * dst_cumulative_size / src_cumulative_size) as u32;
                 let text = format!("Moving...({}% done)", percentage);
@@ -667,7 +683,7 @@ impl System {
         }
 
         // TODO: mb remove
-        if !self.transfers.is_empty() { self.update_current(); }
+        if finished_some || !self.transfers.is_empty() { self.update_current(); }
 
         // Leave only the ones with uncompleted (None) sizes left
         self.transfers.retain(|t| !t.dst_sizes.iter().all(|&size| size.is_some()));
@@ -923,6 +939,7 @@ impl System {
 
     pub fn clear_selection(&mut self) {
         self.selected.clear();
+        self.potential_transfer_data = None;
     }
 
     pub fn invert_selection(&self) {
