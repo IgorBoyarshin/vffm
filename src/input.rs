@@ -51,6 +51,8 @@ pub fn generate_possible_inputs() -> Vec<(Combination, Command)> {
     inputs.push(("gc".to_string(), Command::GoTo("/home/igorek/screenshots")));
     inputs.push(("gt".to_string(), Command::GoTo("/home/igorek/Stuff")));
     inputs.push(("gm".to_string(), Command::GoTo("/home/igorek/Mutual")));
+    inputs.push(("ge".to_string(), Command::GoTo("/mnt/External")));
+    inputs.push(("gE".to_string(), Command::GoTo("/mnt/External2")));
     inputs.push(("dd".to_string(), Command::Remove));
     inputs.push(("dc".to_string(), Command::Cut));
     inputs.push(("yy".to_string(), Command::Yank));
