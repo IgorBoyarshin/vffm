@@ -20,6 +20,9 @@ pub enum Command {
     Yank,
     Paste,
     CumulativeSize,
+    SelectUnderCursor,
+    InvertSelection,
+    ClearSelection,
     // NewTab,
     // CloseTab,
     // NextTab,
@@ -59,6 +62,9 @@ pub fn generate_possible_inputs() -> Vec<(Combination, Command)> {
     inputs.push(("pp".to_string(), Command::Paste));
     inputs.push(("u".to_string(), Command::Update));
     inputs.push(("cs".to_string(), Command::CumulativeSize));
+    inputs.push(("v".to_string(), Command::SelectUnderCursor));
+    inputs.push(("V".to_string(), Command::InvertSelection));
+    inputs.push(("cc".to_string(), Command::ClearSelection));
     inputs
 }
 
@@ -77,6 +83,9 @@ pub fn description_of(command: &Command) -> String {
         Command::Cut => "Cut selected entries into buffer".to_string(),
         Command::Paste => "Paste the yanked entry into the current directory".to_string(),
         Command::CumulativeSize => "Calculate the cumulative size of current entry".to_string(),
+        Command::SelectUnderCursor => "Flips the selection for the entry under cursor".to_string(),
+        Command::InvertSelection => "Inverts the selection in the current directory".to_string(),
+        Command::ClearSelection => "Clears the list of selected items".to_string(),
     }
 }
 

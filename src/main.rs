@@ -129,6 +129,9 @@ impl Overseer {
             Command::Cut                => system.cut_selected(),
             Command::Paste              => system.paste_into_current(),
             Command::CumulativeSize     => system.get_cumulative_size(),
+            Command::SelectUnderCursor  => system.select_under_cursor(),
+            Command::InvertSelection    => system.invert_selection(),
+            Command::ClearSelection     => system.clear_selection(),
         }
         terminate
     }

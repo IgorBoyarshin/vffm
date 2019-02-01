@@ -189,6 +189,8 @@ pub struct System {
 
     transfers: Vec<Transfer>,
     potential_transfer_data: Option<PotentialTransfer>,
+
+    selected: Vec<PathBuf>,
 }
 
 impl System {
@@ -215,6 +217,8 @@ impl System {
 
             transfers: Vec::new(),
             potential_transfer_data: None,
+
+            selected: Vec::new(),
         }
     }
 //-----------------------------------------------------------------------------
@@ -832,26 +836,30 @@ impl System {
         self.update();
     }
 //-----------------------------------------------------------------------------
-
-
     fn list_entry(&self, cs: &mut ColorSystem, column_index: usize,
-            y: usize, entry: &Entry, selected: bool) {
+            y: usize, entry: &Entry, under_cursor: bool, selected: bool) {
         let paint = match entry.entrytype {
             EntryType::Regular => self.settings.file_paint,
             EntryType::Directory => self.settings.dir_paint,
             EntryType::Symlink => self.settings.symlink_paint,
             EntryType::Unknown => self.settings.unknown_paint,
         };
-        let paint = System::maybe_selected_paint_from(paint, selected);
-        cs.set_paint(&self.window, paint);
+        let paint = System::maybe_selected_paint_from(paint, under_cursor);
 
-        let (begin, end) = self.display_settings.columns_coord[column_index];
+        let y = y as Coord + self.display_settings.entries_display_begin;
+        let (mut begin, end) = self.display_settings.columns_coord[column_index];
+        if selected {
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Red, Color::Default));
+            self.window.mvaddch(y, begin + 1, ACS_CKBOARD());
+            self.window.mvaddch(y, begin + 2, ' ');
+            begin += 2;
+        }
         let column_width = end - begin;
         let size = System::human_size(entry.size);
         let size_len = size.len();
         let name_len = System::chars_amount(&entry.name) as i32;
         let empty_space_length = column_width - name_len - size_len as i32;
-        let y = y as Coord + self.display_settings.entries_display_begin;
+        cs.set_paint(&self.window, paint);
         if empty_space_length < 1 {
             // everything doesn't fit => sacrifice Size and truncate the Name
             let name = System::truncate_with_delimiter(&entry.name, column_width);
@@ -869,15 +877,56 @@ impl System {
     }
 
     fn list_entries(&self, mut cs: &mut ColorSystem, column_index: usize,
-            entries: &Vec<Entry>, selected_index: Option<usize>, shift: usize) {
+            entries: &Vec<Entry>, cursor_index: Option<usize>, shift: usize, path_to_dir: Option<&PathBuf>) {
         for (index, entry) in entries.into_iter().enumerate()
                 .skip(shift).take(self.display_settings.column_effective_height) {
-            let selected = match selected_index {
+            let under_cursor = match cursor_index {
                 Some(i) => (i == index),
                 None    => false,
             };
-            self.list_entry(&mut cs, column_index, index - shift, &entry, selected);
+            let selected = if let Some(path_to_dir) = path_to_dir {
+                self.is_selected_by_name(&entry.name, path_to_dir)
+            } else { false };
+
+            self.list_entry(&mut cs, column_index, index - shift, &entry, under_cursor, selected);
         }
+    }
+
+    fn is_selected_by_name(&self, name: &str, path: &PathBuf) -> bool {
+        for item in self.selected.iter() {
+            if item.ends_with(name) { // check partialy
+                if path_to_str(item) == path_to_str(&path.join(name)) { // verify
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn maybe_index_of_selected(&self, path: &PathBuf) -> Option<usize> {
+        for (index, item) in self.selected.iter().enumerate() {
+            if path_to_str(item) == path_to_str(path) { return Some(index); }
+        }
+        None
+    }
+
+    pub fn select_under_cursor(&mut self) {
+        if let Some(path) = self.context.current_path.as_ref() {
+            if let Some(index) = self.maybe_index_of_selected(path) {
+                self.selected.remove(index);
+            } else {
+                self.selected.push(path.clone());
+            }
+        }
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.selected.clear();
+    }
+
+    pub fn invert_selection(&self) {
+        // TODO
     }
 //-----------------------------------------------------------------------------
     fn clear(&self, cs: &mut ColorSystem) {
@@ -907,6 +956,7 @@ impl System {
         self.maybe_draw_additional_info_for_current(&mut cs, &mut bottom_bar);
         self.draw_notification_text(&mut cs, &mut bottom_bar);
         self.update_and_draw_notification(&mut cs, &mut bottom_bar);
+        self.maybe_draw_selection_warning(&mut cs, &mut bottom_bar);
 
         self.window.refresh();
     }
@@ -942,8 +992,16 @@ impl System {
 
     fn draw_left_column(&self, mut cs: &mut ColorSystem) {
         let column_index = 0;
-        self.list_entries(&mut cs, column_index, &self.context.parent_siblings,
-              Some(self.context.parent_index), self.context.parent_siblings_shift);
+        if path_to_str(&self.context.parent_path) == "/" {
+            self.list_entries(&mut cs, column_index, &self.context.parent_siblings,
+                  Some(self.context.parent_index), self.context.parent_siblings_shift,
+                  None);
+        } else {
+            let grandparent = self.context.parent_path.parent().unwrap().to_path_buf();
+            self.list_entries(&mut cs, column_index, &self.context.parent_siblings,
+                  Some(self.context.parent_index), self.context.parent_siblings_shift,
+                  Some(&grandparent));
+        };
     }
 
     fn draw_middle_column(&self, mut cs: &mut ColorSystem) {
@@ -952,7 +1010,8 @@ impl System {
             self.draw_empty_sign(&mut cs, column_index);
         } else {
             self.list_entries(&mut cs, column_index, &self.context.current_siblings,
-              Some(self.context.current_index), self.context.current_siblings_shift);
+              Some(self.context.current_index), self.context.current_siblings_shift,
+              Some(&self.context.parent_path));
         }
     }
 
@@ -963,7 +1022,8 @@ impl System {
             if siblings.is_empty() {
                 self.draw_empty_sign(&mut cs, column_index);
             } else {
-                self.list_entries(&mut cs, column_index, siblings, None, 0);
+                self.list_entries(&mut cs, column_index, siblings, None, 0,
+                                  Some(self.context.current_path.as_ref().unwrap()));
             }
         } else if let Some(preview) = self.context.right_column.preview_ref() {
             let (begin, _) = self.display_settings.columns_coord[column_index];
@@ -1020,6 +1080,13 @@ impl System {
                 cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
                 bar.draw_right(&self.window, &notification.text, 2);
             }
+        }
+    }
+
+    fn maybe_draw_selection_warning(&self, cs: &mut ColorSystem, bar: &mut Bar) {
+        if !self.selected.is_empty() {
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Red, Color::Default).bold());
+            bar.draw_left(&self.window, "Selection not empty", 2);
         }
     }
 //-----------------------------------------------------------------------------
