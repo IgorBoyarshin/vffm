@@ -122,7 +122,7 @@ struct Context {
     current_siblings_shift: usize, // depends on display_settings
 
     current_permissions: String,
-    symlink_target: Option<String>,
+    additional_entry_info: Option<String>,
 }
 
 pub struct System {
@@ -179,6 +179,7 @@ impl System {
         let parent_siblings = System::sort(collect_siblings_of(&starting_path), sorting_type);
         let first_entry_path =
             System::path_of_nth_entry_inside(0, &starting_path, &current_siblings);
+        let first_entry_ref = System::nth_entry_inside(0, &current_siblings);
         let parent_index = System::index_of_entry_inside(&starting_path, &parent_siblings).unwrap();
         let current_index = 0;
         let column_index = 2;
@@ -196,11 +197,13 @@ impl System {
         Context {
             parent_index,
             current_index,
-            current_siblings,
             parent_siblings,
-            right_column,
             current_permissions: System::string_permissions_for_path(&first_entry_path),
-            symlink_target: System::get_symlink_target(&first_entry_path),
+            additional_entry_info: System::get_additional_entry_info(first_entry_ref,
+                                                     &first_entry_path, &right_column),
+            current_siblings,
+            right_column,
+            // additional_entry_info: System::get_symlink_target(&first_entry_path),
             current_path: first_entry_path,
             parent_path: starting_path,
 
@@ -471,6 +474,30 @@ impl System {
         System::string_permissions_for_path(&self.context.current_path)
     }
 
+    fn get_additional_entry_info_for_current(&self) -> Option<String> {
+        System::get_additional_entry_info(self.current_entry_ref(),
+                                        &self.context.current_path, &self.context.right_column)
+    }
+
+    fn get_additional_entry_info(entry: Option<&Entry>, path: &Option<PathBuf>,
+                                 right_column: &RightColumn) -> Option<String> {
+        if let Some(entry) = entry {
+            if entry.is_dir() { // get sub-entries count
+                if let Some(siblings) = right_column.siblings_ref() {
+                    let count = siblings.len().to_string();
+                    let text = "Entries inside: ".to_string() + &count;
+                    return Some(text);
+                }
+            } else if entry.is_symlink() { // get the path the link points to
+                if let Some(result) = System::get_symlink_target(path) {
+                    let text = "-> ".to_string() + &result;
+                    return Some(text);
+                }
+            }
+        }
+        None
+    }
+
     fn get_symlink_target(path: &Option<PathBuf>) -> Option<String> {
         if let Some(path) = path {
             if is_symlink(path) {
@@ -482,14 +509,14 @@ impl System {
         None
     }
 
-    fn get_symlink_target_for_current(&self) -> Option<String> {
-        System::get_symlink_target(&self.context.current_path)
-    }
-
-    // fn current_entry_ref(&self) -> Option<&Entry> {
-    //     if self.current_path.is_some() { Some(self.unsafe_current_entry_ref()) }
-    //     else { None }
+    // fn get_symlink_target_for_current(&self) -> Option<String> {
+    //     System::get_symlink_target(&self.context.current_path)
     // }
+
+    fn current_entry_ref(&self) -> Option<&Entry> {
+        if self.context.current_path.is_some() { Some(self.unsafe_current_entry_ref()) }
+        else                                   { None }
+    }
 
     fn unsafe_current_entry_ref(&self) -> &Entry {
         self.context.current_siblings.get(self.context.current_index).unwrap()
@@ -515,6 +542,12 @@ impl System {
         let mut path = path.clone();
         path.push(name);
         Some(path)
+    }
+
+    fn nth_entry_inside(n: usize, entries: &Vec<Entry>) -> Option<&Entry> {
+        if entries.is_empty() { return None; }
+        if n >= entries.len() { return None; }
+        Some(entries.get(n).unwrap())
     }
 
     // fn current_is_dir_or_symlink(&self) -> bool {
@@ -662,7 +695,7 @@ impl System {
         self.context.current_permissions = self.get_current_permissions();
         self.context.right_column = self.collect_right_column_of_current();
         self.context.current_siblings_shift = self.recalculate_current_siblings_shift();
-        self.context.symlink_target = self.get_symlink_target_for_current();
+        self.context.additional_entry_info = self.get_additional_entry_info_for_current();
         if let Some(new_size) = maybe_size(self.context.current_path.as_ref().unwrap()) {
             self.unsafe_current_entry_mut().size = new_size;
         }
@@ -681,7 +714,7 @@ impl System {
         self.context.right_column = self.collect_right_column_of_current();
         self.context.current_siblings = self.collect_sorted_children_of_parent();
         self.context.parent_siblings = self.collect_sorted_siblings_of_parent();
-        self.context.symlink_target = self.get_symlink_target_for_current();
+        self.context.additional_entry_info = self.get_additional_entry_info_for_current();
     }
 //-----------------------------------------------------------------------------
     pub fn up(&mut self) {
@@ -820,7 +853,7 @@ impl System {
         self.draw_current_path(&mut cs);
         self.draw_current_permission(&mut cs);
         self.draw_current_size(&mut cs);
-        self.maybe_draw_current_symlink_target(&mut cs);
+        self.maybe_draw_additional_info_for_current(&mut cs);
 
         self.draw_notification_text(&mut cs);
         self.update_and_draw_notification(&mut cs);
@@ -915,11 +948,10 @@ impl System {
         }
     }
 
-    fn maybe_draw_current_symlink_target(&self, cs: &mut ColorSystem) {
-        if let Some(target) = self.context.symlink_target.as_ref() {
-            let text = "-> ".to_string() + target;
+    fn maybe_draw_additional_info_for_current(&self, cs: &mut ColorSystem) {
+        if let Some(info) = self.context.additional_entry_info.as_ref() {
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
-            mvprintw(&self.window, self.display_settings.height - 1, 17, &text);
+            mvprintw(&self.window, self.display_settings.height - 1, 17, &info);
         }
     }
 
