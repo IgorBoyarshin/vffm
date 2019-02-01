@@ -16,8 +16,8 @@ use crate::input::*;
 //-----------------------------------------------------------------------------
 struct Bar {
     y: Coord,
-    ready_left: Coord, // first x Coord of a not-taken cell from the left
-    ready_right: Coord, // first x Coord of a not-taken cell from the right
+    ready_left: Coord, // x Coord of the first not-taken cell from the left
+    ready_right: Coord, // x Coord of the first taken cell after all not-talen
 }
 
 impl Bar {
@@ -41,10 +41,10 @@ impl Bar {
         if len > free {
             let mut copy = text.to_string().clone();
             copy.truncate(free);
-            mvprintw(window, self.y, self.ready_left, &copy);
+            mvprintw(window, self.y, self.ready_right - free as Coord, &copy);
             self.ready_right -= free as Coord + padding;
         } else {
-            mvprintw(window, self.y, self.ready_left, &text);
+            mvprintw(window, self.y, self.ready_right - len as Coord, &text);
             self.ready_right -= len as Coord + padding;
         }
     }
@@ -57,7 +57,7 @@ impl Bar {
         Bar {
             y,
             ready_left: 0,
-            ready_right: width - 1,
+            ready_right: width,
         }
     }
 }
@@ -1018,7 +1018,7 @@ impl System {
                 self.notification = None;
             } else {
                 cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-                bar.draw_left(&self.window, &notification.text, 2);
+                bar.draw_right(&self.window, &notification.text, 2);
             }
         }
     }
