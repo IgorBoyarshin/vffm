@@ -543,18 +543,18 @@ impl System {
 
     fn get_additional_entry_info_for_current(&self) -> Option<String> {
         System::get_additional_entry_info(self.current_entry_ref(),
-                                        &self.context.current_path, &self.context.right_column)
+                        &self.context.current_path, &self.context.right_column)
     }
 
     fn get_additional_entry_info(entry: Option<&Entry>, path: &Option<PathBuf>,
                                  right_column: &RightColumn) -> Option<String> {
         if let Some(entry) = entry {
             if entry.is_dir() { // get sub-entries count
-                if let Some(siblings) = right_column.siblings_ref() {
-                    let count = siblings.len().to_string();
-                    let text = "Entries inside: ".to_string() + &count;
-                    return Some(text);
-                }
+                // if let Some(siblings) = right_column.siblings_ref() {
+                //     let count = siblings.len().to_string();
+                //     let text = "Entries inside: ".to_string() + &count;
+                //     return Some(text);
+                // }
             } else if entry.is_symlink() { // get the path the link points to
                 if let Some(result) = System::get_symlink_target(path) {
                     let text = "-> ".to_string() + &result;
@@ -972,6 +972,7 @@ impl System {
         self.draw_current_permission(&mut cs, &mut bottom_bar);
         self.draw_current_size(&mut cs, &mut bottom_bar);
         self.maybe_draw_additional_info_for_current(&mut cs, &mut bottom_bar);
+        self.draw_current_dir_siblings_count(&mut cs, &mut bottom_bar);
         self.draw_notification_text(&mut cs, &mut bottom_bar);
         self.update_and_draw_notification(&mut cs, &mut bottom_bar);
         self.maybe_draw_selection_warning(&mut cs, &mut bottom_bar);
@@ -1081,6 +1082,12 @@ impl System {
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
             bar.draw_left(&self.window, &info, 2);
         }
+    }
+
+    fn draw_current_dir_siblings_count(&self, cs: &mut ColorSystem, bar: &mut Bar) {
+        let text = "Siblings = ".to_string() + &self.context.current_siblings.len().to_string();
+        cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
+        bar.draw_left(&self.window, &text, 2);
     }
 
     fn draw_notification_text(&self, cs: &mut ColorSystem, bar: &mut Bar) {
