@@ -437,7 +437,8 @@ impl System {
     }
 
     fn yank(src: &str, dst: &str) {
-        System::spawn_process_async("rsync", vec!["-a", "-v", "-h", src, dst]);
+        System::spawn_process_async("cp", vec!["-a", src, dst]);
+        // System::spawn_process_async("rsync", vec!["-a", "-v", "-h", src, dst]);
     }
 
     pub fn paste_into_current(&mut self) {
@@ -450,7 +451,7 @@ impl System {
                 }).collect();
             for (src_path, dst_path) in data.src_paths.iter().zip(dst_paths.iter()) {
                 let mut src = path_to_string(src_path);
-                if is_dir(src_path) { src+= "/"; } // so that rsync works as we want
+                if is_dir(src_path) { src += "/."; } // so that cp works as we want
 
                 let dst = path_to_string(dst_path);
                 match data.transfer_type {
@@ -659,24 +660,28 @@ impl System {
             for (index, &size) in dst_sizes.iter().enumerate() {
                 let finished_this_one = size == transfer.src_sizes[index];
                 if finished_this_one { // then cache for later
-                    // transfer.dst_finished[index] = true;
                     transfer.dst_sizes   [index] = Some(size);
                 }
             }
             let src_cumulative_size: Size = transfer.src_sizes.iter().sum();
             let dst_cumulative_size: Size =          dst_sizes.iter().sum();
 
+            log(&src_cumulative_size.to_string());
+            log(&dst_cumulative_size.to_string());
             if src_cumulative_size == dst_cumulative_size { // finished
                 // Can remove this transfer now. Do it after this loop with retain()
                 let text = match transfer.transfer_type {
-                    TransferType::Cut => "Done moving!",
+                    TransferType::Cut  => "Done moving!",
                     TransferType::Yank => "Done copying!",
                 };
                 self.notification = Some(Notification::new(text, 3000));
                 finished_some = true;
             } else { // partially finished
                 let percentage = (100 * dst_cumulative_size / src_cumulative_size) as u32;
-                let text = format!("Moving...({}% done)", percentage);
+                let text = match transfer.transfer_type {
+                    TransferType::Cut  => format!("Moving...({}% done)", percentage),
+                    TransferType::Yank => format!("Copying...({}% done)", percentage),
+                };
                 self.notification = Some(Notification::new(&text, 3000));
                 System::set_drawing_delay(DrawingDelay::Transfering);
             }
