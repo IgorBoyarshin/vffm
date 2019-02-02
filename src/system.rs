@@ -666,8 +666,6 @@ impl System {
             let src_cumulative_size: Size = transfer.src_sizes.iter().sum();
             let dst_cumulative_size: Size =          dst_sizes.iter().sum();
 
-            log(&src_cumulative_size.to_string());
-            log(&dst_cumulative_size.to_string());
             if src_cumulative_size == dst_cumulative_size { // finished
                 // Can remove this transfer now. Do it after this loop with retain()
                 let text = match transfer.transfer_type {
