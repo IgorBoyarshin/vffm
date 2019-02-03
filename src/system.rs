@@ -16,6 +16,7 @@ use crate::input::*;
 //-----------------------------------------------------------------------------
 struct Tab {
     name: String,
+    context: Context,
 }
 //-----------------------------------------------------------------------------
 pub struct Settings {
@@ -38,7 +39,7 @@ struct DisplaySettings {
 
     scrolling_gap: usize, // const
     column_effective_height: usize, // const
-    entries_display_begin: i32, // const
+    entries_display_begin: Coord, // const
 }
 
 struct Context {
@@ -604,17 +605,17 @@ impl System {
     // The display is guaranteed to be able to contain 2*gap (accomplished in settings)
     fn siblings_shift_for(gap: usize, max: usize, index: usize,
                               len: usize, old_shift: Option<usize>) -> usize {
-        let gap   = gap   as i32;
-        let max   = max   as i32;
-        let index = index as i32;
-        let len   = len   as i32;
+        let gap   = gap   as Coord;
+        let max   = max   as Coord;
+        let index = index as Coord;
+        let len   = len   as Coord;
 
         if len <= max         { return 0; }
         if index < gap        { return 0; }
         if index >= len - gap { return (len - max) as usize; }
 
         if let Some(old_shift) = old_shift {
-            let old_shift = old_shift as i32;
+            let old_shift = old_shift as Coord;
 
             let shift = index - gap;
             if shift < old_shift { return shift as usize; }
@@ -763,13 +764,13 @@ impl System {
         let column_width = end - begin;
         let size = System::human_size(entry.size);
         let size_len = size.len();
-        let name_len = System::chars_amount(&entry.name) as i32;
-        let empty_space_length = column_width - name_len - size_len as i32;
+        let name_len = System::chars_amount(&entry.name) as Coord;
+        let empty_space_length = column_width - name_len - size_len as Coord;
         cs.set_paint(&self.window, paint);
         if empty_space_length < 1 {
             // everything doesn't fit => sacrifice Size and truncate the Name
             let name = System::truncate_with_delimiter(&entry.name, column_width);
-            let name_len = System::chars_amount(&name) as i32;
+            let name_len = System::chars_amount(&name) as Coord;
             let leftover = column_width - name_len;
             mvprintw(&self.window, y, begin + 1, &name);
             self.window.mv(y, begin + 1 + name_len);
@@ -938,7 +939,7 @@ impl System {
             let y = self.display_settings.entries_display_begin;
             cs.set_paint(&self.window, self.settings.preview_paint);
             for (i, line) in preview.iter().enumerate() {
-                mvprintw(&self.window, y + i as i32, begin + 1, line);
+                mvprintw(&self.window, y + i as Coord, begin + 1, line);
             }
         } // display nothing otherwise
     }
@@ -1010,15 +1011,15 @@ impl System {
 
         // Borders
         cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-        let y = self.display_settings.height - 2 - matches.len() as i32 - 1;
+        let y = self.display_settings.height - 2 - matches.len() as Coord - 1;
         self.window.mv(y, 0);
         self.window.hline(ACS_HLINE(), self.display_settings.width);
         self.window.mv(self.display_settings.height - 2, 0);
         self.window.hline(ACS_HLINE(), self.display_settings.width);
 
-        let max_len = max_combination_len() as i32;
+        let max_len = max_combination_len() as Coord;
         for (i, (combination, command)) in matches.iter().enumerate() {
-            let y = y + 1 + i as i32;
+            let y = y + 1 + i as Coord;
 
             // Combination
             let (completed_part, uncompleted_part) = combination.split_at(completion_count);
@@ -1028,15 +1029,15 @@ impl System {
             printw(  &self.window,       &uncompleted_part);
 
             // Space till description
-            let left = max_len - combination.len() as i32;
+            let left = max_len - combination.len() as Coord;
             self.window.hline(' ', left);
 
             // Command description
             let description = description_of(&command);
-            mvprintw(&self.window, y, max_len as i32, &description);
+            mvprintw(&self.window, y, max_len as Coord, &description);
 
             // Space till end
-            let left = self.display_settings.width - max_len - description.len() as i32;
+            let left = self.display_settings.width - max_len - description.len() as Coord;
             self.window.hline(' ', left);
         }
     }
@@ -1067,7 +1068,7 @@ impl System {
         result
     }
 
-    fn truncate_with_delimiter(string: &str, max_length: i32) -> String {
+    fn truncate_with_delimiter(string: &str, max_length: Coord) -> String {
         let chars_amount = System::chars_amount(&string);
         if chars_amount > max_length as usize {
             let delimiter = "...";
@@ -1124,7 +1125,7 @@ impl System {
         for (index, r) in ratio.iter().enumerate() {
             let weight = ((*r as f32 / sum) * width) as Coord;
             let end = if index == last_index {
-                width as i32 - 2
+                width as Coord - 2
             } else {
                 pos + weight
             };
@@ -1177,7 +1178,7 @@ impl System {
         half_delay(drawing_delay.ms() / 100); // expects argument in tens of a second
     }
 
-    fn get_height_width(window: &Window) -> (i32, i32) {
+    fn get_height_width(window: &Window) -> (Coord, Coord) {
         window.get_max_yx()
     }
 
@@ -1205,13 +1206,13 @@ impl Drop for System {
     }
 }
 //-----------------------------------------------------------------------------
-fn printw(window: &Window, string: &str) -> i32 {
+fn printw(window: &Window, string: &str) -> Coord {
     // To avoid printw's substitution
     let string = string.to_string().replace("%", "%%");
     window.printw(string)
 }
 
-fn mvprintw(window: &Window, y: i32, x: i32, string: &str) -> i32 {
+fn mvprintw(window: &Window, y: Coord, x: Coord, string: &str) -> Coord {
     window.mv(y, x);
     printw(window, string)
 }
