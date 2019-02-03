@@ -1077,6 +1077,7 @@ impl System {
     }
 
     fn draw_tabs(&self, cs: &mut ColorSystem, bar: &mut Bar) {
+        if self.tabs.len() == 1 { return; }
         for (index, tab) in self.tabs.iter().enumerate().rev() {
             if index == self.current_tab_index {
                 cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default).bold());
