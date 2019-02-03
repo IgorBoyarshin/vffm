@@ -1,7 +1,6 @@
-use std::{thread, time};
+// use std::{thread, time};
 
 extern crate pancurses;
-use pancurses::Input;
 
 mod coloring;
 use crate::coloring::*;
@@ -81,9 +80,8 @@ impl Overseer {
 
     fn maybe_draw_matches(&mut self) {
         if self.current_input.is_empty() { return; }
-
         let found_matches = matches_that_start_with(
-            &self.current_input, &self.possible_inputs);
+            &Combination::Str(self.current_input.clone()), &self.possible_inputs);
         if found_matches.len() > 0 {
             let completion = self.current_input.len();
             self.system.draw_available_matches(
@@ -93,24 +91,36 @@ impl Overseer {
 
     fn handle_input(&mut self) {
         let input = self.system.get();
-        if let Some(Input::Character(c)) = input {
+        if let Some(Input::EventResize) = input { self.system.resize(); }
+        else if let Some(input) = input {
             if self.mode == Mode::AwaitingCommand {
-                self.current_input.push(c);
-
-                let mut found_matches = matches_that_start_with(
-                    &self.current_input, &self.possible_inputs);
-                let found_exact = exact_match(&found_matches, &self.current_input);
-                if found_exact {
-                    let (_, command) = found_matches.pop().unwrap();
-                    let terminate = Overseer::handle_command(&mut self.system, command);
-                    if terminate { self.terminated = true; }
-                }
-
-                if found_exact || found_matches.is_empty() {
-                    self.current_input.clear();
-                }
+                match input {
+                    Input::Tab => self.handle_combination(&Combination::Tab),
+                    Input::ShiftTab => self.handle_combination(&Combination::ShiftTab),
+                    Input::Char(c) => {
+                        self.current_input.push(c);
+                        self.handle_combination(&Combination::Str(self.current_input.clone()));
+                    },
+                    _ => {},
+                };
             } else if self.mode == Mode::Input {}
-        } else if let Some(Input::KeyResize) = input { self.system.resize(); }
+        }
+    }
+
+    // Returns whether to terminate
+    fn handle_combination(&mut self, combination: &Combination) {
+        let mut found_matches = matches_that_start_with(
+            combination, &self.possible_inputs);
+        let found_exact = exact_match(&found_matches, combination);
+        if found_exact {
+            let (_, command) = found_matches.pop().unwrap();
+            let terminate = Overseer::handle_command(&mut self.system, command);
+            if terminate { self.terminated = true; }
+        }
+
+        if found_exact || found_matches.is_empty() {
+            self.current_input.clear();
+        }
     }
 
     fn handle_command(system: &mut System, command: &Command) -> bool {
@@ -132,6 +142,10 @@ impl Overseer {
             Command::SelectUnderCursor  => system.select_under_cursor(),
             Command::InvertSelection    => system.invert_selection(),
             Command::ClearSelection     => system.clear_selection(),
+            Command::NewTab             => system.new_tab(),
+            Command::CloseTab           => terminate = system.close_tab(),
+            Command::NextTab            => system.next_tab(),
+            Command::PreviousTab        => system.previous_tab(),
         }
         terminate
     }

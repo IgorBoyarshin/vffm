@@ -1,11 +1,14 @@
-use pancurses::*;
+// use pancurses::*;
+use pancurses::{Window, initscr, start_color, use_default_colors, noecho, half_delay, endwin, curs_set,
+    ACS_CKBOARD, ACS_VLINE, ACS_HLINE, ACS_TTEE, ACS_BTEE,
+    ACS_LLCORNER, ACS_LRCORNER, ACS_ULCORNER, ACS_URCORNER};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::collections::HashMap;
 use std::ops::RangeBounds;
 use std::ffi::OsStr;
 use std::process::Child;
-use std::io::Read;
+// use std::io::Read;
 use std::time::SystemTime;
 
 use crate::coloring::*;
@@ -13,11 +16,6 @@ use crate::filesystem::*;
 use crate::input::*;
 
 
-//-----------------------------------------------------------------------------
-struct Tab {
-    name: String,
-    context: Context,
-}
 //-----------------------------------------------------------------------------
 pub struct Settings {
     pub primary_paint: Paint,
@@ -42,6 +40,7 @@ struct DisplaySettings {
     entries_display_begin: Coord, // const
 }
 
+#[derive(Clone)]
 struct Context {
     current_siblings: Vec<Entry>,
     parent_siblings: Vec<Entry>,
@@ -105,7 +104,7 @@ impl System {
 
             selected: Vec::new(),
 
-            tabs: vec![Tab { name: "Initial".to_string(), context }],
+            tabs: vec![Tab { name: System::tab_name_from_path(&context.parent_path), context }],
             current_tab_index: 0,
         }
     }
@@ -409,6 +408,44 @@ impl System {
         self.context_mut().cumulative_size_text = Some("Size: ".to_string() + &System::human_size(size));
     }
 //-----------------------------------------------------------------------------
+    fn update_current_tab_name(&mut self) {
+        let parent_path = &self.context_ref().parent_path;
+        self.current_tab_mut().name = System::tab_name_from_path(parent_path);
+    }
+
+    fn tab_name_from_path(path: &PathBuf) -> String {
+        osstr_to_str(path.file_name().unwrap()).to_string()
+    }
+
+    // Returns whether is was the last Tab (then perhaps whether we should terminate)
+    pub fn close_tab(&mut self) -> bool {
+        self.tabs.remove(self.current_tab_index);
+        if self.current_tab_index > 0 && self.current_tab_index >= self.tabs.len() {
+            self.current_tab_index = self.tabs.len() - 1
+        }
+        self.tabs.is_empty()
+    }
+
+    pub fn new_tab(&mut self) {
+        self.tabs.push(self.current_tab_ref().clone());
+    }
+
+    pub fn next_tab(&mut self) {
+        if self.current_tab_index == self.tabs.len() - 1 {
+            self.current_tab_index = 0;
+        } else {
+            self.current_tab_index += 1;
+        }
+    }
+
+    pub fn previous_tab(&mut self) {
+        if self.current_tab_index == 0 {
+            self.current_tab_index = self.tabs.len() - 1;
+        } else {
+            self.current_tab_index -= 1;
+        }
+    }
+//-----------------------------------------------------------------------------
     pub fn sort_with(&mut self, new_sorting_type: SortingType) {
         self.sorting_type = new_sorting_type;
         self.update_current();
@@ -543,6 +580,7 @@ impl System {
         if self.context_ref().current_path.is_none() { return; }
         let current_path = self.context_ref().current_path.as_ref().unwrap().clone();
         self.current_tab_mut().context = self.generate_context_for(current_path);
+        self.update_current_tab_name();
     }
 
     // Update central column and right column
@@ -700,6 +738,7 @@ impl System {
         self.context_mut().current_siblings = self.collect_sorted_children_of_parent();
         self.context_mut().parent_siblings = self.collect_sorted_siblings_of_parent();
         self.context_mut().additional_entry_info = self.get_additional_entry_info_for_current();
+        self.update_current_tab_name();
     }
 //-----------------------------------------------------------------------------
     pub fn up(&mut self) {
@@ -893,6 +932,9 @@ impl System {
         self.update_and_draw_notification(&mut cs, &mut bottom_bar);
         self.maybe_draw_selection_warning(&mut cs, &mut bottom_bar);
 
+        let mut top_bar = Bar::with_y_and_width(0, self.display_settings.width);
+        self.draw_tabs(&mut cs, &mut top_bar);
+
         self.window.refresh();
     }
 
@@ -1033,6 +1075,18 @@ impl System {
             bar.draw_left(&self.window, "Selection not empty", 2);
         }
     }
+
+    fn draw_tabs(&self, cs: &mut ColorSystem, bar: &mut Bar) {
+        for (index, tab) in self.tabs.iter().enumerate().rev() {
+            if index == self.current_tab_index {
+                cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default).bold());
+            } else {
+                cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
+            }
+            let text = "<".to_string() + &index.to_string() + ":" + &tab.name + &">".to_string();
+            bar.draw_right(&self.window, &text, 0);
+        }
+    }
 //-----------------------------------------------------------------------------
     pub fn draw_available_matches(&self, cs: &mut ColorSystem,
             matches: &Vec<&Match>, completion_count: usize) {
@@ -1048,26 +1102,28 @@ impl System {
 
         let max_len = max_combination_len() as Coord;
         for (i, (combination, command)) in matches.iter().enumerate() {
-            let y = y + 1 + i as Coord;
+            if let Combination::Str(combination) = combination {
+                let y = y + 1 + i as Coord;
 
-            // Combination
-            let (completed_part, uncompleted_part) = combination.split_at(completion_count);
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default).bold());
-            mvprintw(&self.window, y, 0, &completed_part);
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-            printw(  &self.window,       &uncompleted_part);
+                // Combination
+                let (completed_part, uncompleted_part) = combination.split_at(completion_count);
+                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default).bold());
+                mvprintw(&self.window, y, 0, &completed_part);
+                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
+                printw(  &self.window,       &uncompleted_part);
 
-            // Space till description
-            let left = max_len - combination.len() as Coord;
-            self.window.hline(' ', left);
+                // Space till description
+                let left = max_len - combination.len() as Coord;
+                self.window.hline(' ', left);
 
-            // Command description
-            let description = description_of(&command);
-            mvprintw(&self.window, y, max_len as Coord, &description);
+                // Command description
+                let description = description_of(&command);
+                mvprintw(&self.window, y, max_len as Coord, &description);
 
-            // Space till end
-            let left = self.display_settings.width - max_len - description.len() as Coord;
-            self.window.hline(' ', left);
+                // Space till end
+                let left = self.display_settings.width - max_len - description.len() as Coord;
+                self.window.hline(' ', left);
+            }
         }
     }
 
@@ -1199,6 +1255,7 @@ impl System {
         start_color();
         use_default_colors();
         noecho();
+        curs_set(0); // Make cursor invisible
 
         window
     }
@@ -1212,7 +1269,17 @@ impl System {
     }
 
     pub fn get(&self) -> Option<Input> {
-        self.window.getch()
+        use pancurses::Input as PInput;
+        match self.window.getch() {
+            Some(PInput::Character('\t')) => Some(Input::Tab),
+            Some(PInput::Character(c))    => Some(Input::Char(c)),
+            Some(PInput::KeyBTab)         => Some(Input::ShiftTab),
+            Some(PInput::KeyResize)       => Some(Input::EventResize),
+            // Some(PInput::KeyBackspace)    => Some(Input::Backspace),
+            // Some(PInput::KeyEnter)        => Some(Input::Enter),
+            None                          => None,
+            _                             => Some(Input::Unknown),
+        }
     }
 
     pub fn resize(&mut self) {
@@ -1298,6 +1365,7 @@ impl SpawnPattern {
     }
 }
 //-----------------------------------------------------------------------------
+#[derive(Clone)]
 struct RightColumn {
     siblings: Option<Vec<Entry>>,
     preview: Option<Vec<String>>,
@@ -1464,6 +1532,12 @@ impl Notification {
     fn has_finished(&self) -> bool {
         millis_since(self.start_time) > self.show_time_millis
     }
+}
+//-----------------------------------------------------------------------------
+#[derive(Clone)]
+struct Tab {
+    name: String,
+    context: Context,
 }
 //-----------------------------------------------------------------------------
 type Coord = i32;
