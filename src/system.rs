@@ -14,122 +14,8 @@ use crate::input::*;
 
 
 //-----------------------------------------------------------------------------
-struct Bar {
-    y: Coord,
-    ready_left: Coord, // x Coord of the first not-taken cell from the left
-    ready_right: Coord, // x Coord of the first taken cell after all not-talen
-}
-
-impl Bar {
-    fn draw_left(&mut self, window: &Window, text: &str, padding: Coord) {
-        let len = text.len();
-        let free = self.free_space();
-        if len > free {
-            let mut copy = text.to_string().clone();
-            copy.truncate(free);
-            mvprintw(window, self.y, self.ready_left, &copy);
-            self.ready_left += free as Coord + padding;
-        } else {
-            mvprintw(window, self.y, self.ready_left, &text);
-            self.ready_left += len as Coord + padding;
-        }
-    }
-
-    fn draw_right(&mut self, window: &Window, text: &str, padding: Coord) {
-        let len = text.len();
-        let free = self.free_space();
-        if len > free {
-            let mut copy = text.to_string().clone();
-            copy.truncate(free);
-            mvprintw(window, self.y, self.ready_right - free as Coord, &copy);
-            self.ready_right -= free as Coord + padding;
-        } else {
-            mvprintw(window, self.y, self.ready_right - len as Coord, &text);
-            self.ready_right -= len as Coord + padding;
-        }
-    }
-
-    fn free_space(&self) -> usize {
-        (self.ready_right - self.ready_left + 1) as usize
-    }
-
-    fn with_y_and_width(y: Coord, width: Coord) -> Bar {
-        Bar {
-            y,
-            ready_left: 0,
-            ready_right: width,
-        }
-    }
-}
-//-----------------------------------------------------------------------------
-enum TransferType {
-    Yank,
-    Cut,
-}
-
-struct PotentialTransfer {
-    src_paths: Vec<PathBuf>,
-    src_sizes: Vec<Size>,
-    transfer_type: TransferType,
-}
-
-struct Transfer {
-    src_sizes: Vec<Size>,
-    dst_paths: Vec<PathBuf>,
-    dst_sizes: Vec<Option<Size>>,
-    transfer_type: TransferType,
-}
-
-impl PotentialTransfer {
-    fn cut(src_paths: Vec<PathBuf>) -> PotentialTransfer {
-        PotentialTransfer::new(src_paths, TransferType::Cut)
-    }
-
-    fn yank(src_paths: Vec<PathBuf>) -> PotentialTransfer {
-        PotentialTransfer::new(src_paths, TransferType::Yank)
-    }
-
-    fn new(src_paths: Vec<PathBuf>, transfer_type: TransferType) -> PotentialTransfer {
-        let src_sizes: Vec<Size> = src_paths.iter().map(|path| cumulative_size(&path)).collect();
-        PotentialTransfer {
-            src_paths,
-            src_sizes,
-            transfer_type,
-        }
-    }
-
-    fn with_dst_paths(self, dst_paths: Vec<PathBuf>) -> Transfer {
-        let amount = self.src_sizes.len();
-        Transfer {
-            src_sizes: self.src_sizes,
-            dst_sizes: vec![None; amount],
-            dst_paths,
-            transfer_type: self.transfer_type,
-        }
-    }
-}
-//-----------------------------------------------------------------------------
-type Millis = u128;
-
-struct Notification {
-    text: String,
-    show_time_millis: Millis,
-    start_time: SystemTime,
-}
-
-impl Notification {
-    fn new(text: &str, show_time_millis: Millis) -> Notification {
-        let text = text.to_string();
-        Notification {
-            text,
-            show_time_millis,
-            start_time: SystemTime::now(),
-        }
-    }
-
-    fn has_finished(&self) -> bool {
-        millis_since(self.start_time) > self.show_time_millis
-    }
+struct Tab {
+    name: String,
 }
 //-----------------------------------------------------------------------------
 pub struct Settings {
@@ -171,6 +57,7 @@ struct Context {
 
     current_permissions: String,
     additional_entry_info: Option<String>,
+    cumulative_size_text: Option<String>,
 }
 //-----------------------------------------------------------------------------
 pub struct System {
@@ -183,7 +70,6 @@ pub struct System {
     sorting_type: SortingType,
     spawn_patterns: Vec<SpawnPattern>, // const
 
-    notification_text: Option<String>,
     notification: Option<Notification>,
 
     transfers: Vec<Transfer>,
@@ -211,7 +97,6 @@ impl System {
             sorting_type,
             spawn_patterns: System::generate_spawn_patterns(),
 
-            notification_text: None, // for CumulativeSize
             notification: None,      // for Transfers
 
             transfers: Vec::new(),
@@ -261,6 +146,7 @@ impl System {
 
             parent_siblings_shift,
             current_siblings_shift,
+            cumulative_size_text: None, // for CumulativeSize
         }
     }
 
@@ -515,7 +401,7 @@ impl System {
     pub fn get_cumulative_size(&mut self) {
         if self.inside_empty_dir() { return }
         let size = cumulative_size(self.context.current_path.as_ref().unwrap());
-        self.notification_text = Some("Size: ".to_string() + &System::human_size(size));
+        self.context.cumulative_size_text = Some("Size: ".to_string() + &System::human_size(size));
     }
 //-----------------------------------------------------------------------------
     pub fn sort_with(&mut self, new_sorting_type: SortingType) {
@@ -763,7 +649,7 @@ impl System {
     }
 
     fn update_current_entry_by_index(&mut self) {
-        self.notification_text = None;
+        self.context.cumulative_size_text = None;
         self.update_last_part_of_current_path_by_index();
         self.context.current_permissions = self.get_current_permissions();
         self.context.right_column = self.collect_right_column_of_current();
@@ -782,7 +668,7 @@ impl System {
     }
 
     fn common_left_right(&mut self) {
-        self.notification_text = None;
+        self.context.cumulative_size_text = None;
         self.context.current_permissions = self.get_current_permissions();
         self.context.right_column = self.collect_right_column_of_current();
         self.context.current_siblings = self.collect_sorted_children_of_parent();
@@ -852,7 +738,7 @@ impl System {
 
     pub fn goto(&mut self, path: &str) {
         self.context.current_path = Some(PathBuf::from(path));
-        self.notification_text = None;
+        self.context.cumulative_size_text = None;
         self.update();
     }
 //-----------------------------------------------------------------------------
@@ -976,7 +862,7 @@ impl System {
         self.draw_current_size(&mut cs, &mut bottom_bar);
         self.maybe_draw_additional_info_for_current(&mut cs, &mut bottom_bar);
         self.draw_current_dir_siblings_count(&mut cs, &mut bottom_bar);
-        self.draw_notification_text(&mut cs, &mut bottom_bar);
+        self.draw_cumulative_size_text(&mut cs, &mut bottom_bar);
         self.update_and_draw_notification(&mut cs, &mut bottom_bar);
         self.maybe_draw_selection_warning(&mut cs, &mut bottom_bar);
 
@@ -1093,8 +979,8 @@ impl System {
         bar.draw_left(&self.window, &text, 2);
     }
 
-    fn draw_notification_text(&self, cs: &mut ColorSystem, bar: &mut Bar) {
-        if let Some(text) = self.notification_text.as_ref() {
+    fn draw_cumulative_size_text(&self, cs: &mut ColorSystem, bar: &mut Bar) {
+        if let Some(text) = self.context.cumulative_size_text.as_ref() {
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
             bar.draw_left(&self.window, text, 2);
         }
@@ -1429,6 +1315,124 @@ impl DrawingDelay {
             DrawingDelay::Transfering => 1000,
             DrawingDelay::Regular => 5000,
         }
+    }
+}
+//-----------------------------------------------------------------------------
+struct Bar {
+    y: Coord,
+    ready_left: Coord, // x Coord of the first not-taken cell from the left
+    ready_right: Coord, // x Coord of the first taken cell after all not-talen
+}
+
+impl Bar {
+    fn draw_left(&mut self, window: &Window, text: &str, padding: Coord) {
+        let len = text.len();
+        let free = self.free_space();
+        if len > free {
+            let mut copy = text.to_string().clone();
+            copy.truncate(free);
+            mvprintw(window, self.y, self.ready_left, &copy);
+            self.ready_left += free as Coord + padding;
+        } else {
+            mvprintw(window, self.y, self.ready_left, &text);
+            self.ready_left += len as Coord + padding;
+        }
+    }
+
+    fn draw_right(&mut self, window: &Window, text: &str, padding: Coord) {
+        let len = text.len();
+        let free = self.free_space();
+        if len > free {
+            let mut copy = text.to_string().clone();
+            copy.truncate(free);
+            mvprintw(window, self.y, self.ready_right - free as Coord, &copy);
+            self.ready_right -= free as Coord + padding;
+        } else {
+            mvprintw(window, self.y, self.ready_right - len as Coord, &text);
+            self.ready_right -= len as Coord + padding;
+        }
+    }
+
+    fn free_space(&self) -> usize {
+        (self.ready_right - self.ready_left + 1) as usize
+    }
+
+    fn with_y_and_width(y: Coord, width: Coord) -> Bar {
+        Bar {
+            y,
+            ready_left: 0,
+            ready_right: width,
+        }
+    }
+}
+//-----------------------------------------------------------------------------
+enum TransferType {
+    Yank,
+    Cut,
+}
+
+struct PotentialTransfer {
+    src_paths: Vec<PathBuf>,
+    src_sizes: Vec<Size>,
+    transfer_type: TransferType,
+}
+
+struct Transfer {
+    src_sizes: Vec<Size>,
+    dst_paths: Vec<PathBuf>,
+    dst_sizes: Vec<Option<Size>>,
+    transfer_type: TransferType,
+}
+
+impl PotentialTransfer {
+    fn cut(src_paths: Vec<PathBuf>) -> PotentialTransfer {
+        PotentialTransfer::new(src_paths, TransferType::Cut)
+    }
+
+    fn yank(src_paths: Vec<PathBuf>) -> PotentialTransfer {
+        PotentialTransfer::new(src_paths, TransferType::Yank)
+    }
+
+    fn new(src_paths: Vec<PathBuf>, transfer_type: TransferType) -> PotentialTransfer {
+        let src_sizes: Vec<Size> = src_paths.iter().map(|path| cumulative_size(&path)).collect();
+        PotentialTransfer {
+            src_paths,
+            src_sizes,
+            transfer_type,
+        }
+    }
+
+    fn with_dst_paths(self, dst_paths: Vec<PathBuf>) -> Transfer {
+        let amount = self.src_sizes.len();
+        Transfer {
+            src_sizes: self.src_sizes,
+            dst_sizes: vec![None; amount],
+            dst_paths,
+            transfer_type: self.transfer_type,
+        }
+    }
+}
+//-----------------------------------------------------------------------------
+type Millis = u128;
+
+struct Notification {
+    text: String,
+    show_time_millis: Millis,
+    start_time: SystemTime,
+}
+
+impl Notification {
+    fn new(text: &str, show_time_millis: Millis) -> Notification {
+        let text = text.to_string();
+        Notification {
+            text,
+            show_time_millis,
+            start_time: SystemTime::now(),
+        }
+    }
+
+    fn has_finished(&self) -> bool {
+        millis_since(self.start_time) > self.show_time_millis
     }
 }
 //-----------------------------------------------------------------------------
