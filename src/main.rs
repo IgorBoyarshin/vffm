@@ -28,9 +28,9 @@ struct Overseer {
     system: System,
 
     mode: Mode,
-    current_input: String,
+    current_input: Option<Combination>,
 
-    possible_inputs: Vec<(Combination, Command)>, // const
+    possible_inputs: Matches, // const
     terminated: bool,
 }
 
@@ -65,7 +65,7 @@ impl Overseer {
             system: Overseer::init_system(starting_path),
             mode: Mode::AwaitingCommand,
             possible_inputs: generate_possible_inputs(),
-            current_input: String::new(),
+            current_input: None,
             terminated: false,
         }
     }
@@ -79,13 +79,16 @@ impl Overseer {
     }
 
     fn maybe_draw_matches(&mut self) {
-        if self.current_input.is_empty() { return; }
-        let found_matches = matches_that_start_with(
-            &Combination::Str(self.current_input.clone()), &self.possible_inputs);
-        if found_matches.len() > 0 {
-            let completion = self.current_input.len();
-            self.system.draw_available_matches(
-                &mut self.color_system, &found_matches, completion);
+        if let Some(combination) = self.current_input.as_ref() {
+            if let Some(matches) = self.possible_inputs.get(&combination) {
+                if matches.len() > 0 {
+                    let completion_count = if let Combination::Str(string) = combination {
+                        string.len()
+                    } else { 0 }; // not supposed to happen
+                    self.system.draw_available_matches(
+                        &mut self.color_system, &matches, completion_count);
+                }
+            }
         }
     }
 
@@ -94,39 +97,40 @@ impl Overseer {
         if let Some(Input::EventResize) = input { self.system.resize(); }
         else if let Some(input) = input {
             if self.mode == Mode::AwaitingCommand {
-                match input {
-                    Input::Tab => self.handle_combination(&Combination::Tab),
-                    Input::ShiftTab => self.handle_combination(&Combination::ShiftTab),
+                let combination = match input {
+                    Input::Tab => Some(Combination::Tab),
+                    Input::ShiftTab => Some(Combination::ShiftTab),
                     Input::Char(c) => {
-                        self.current_input.push(c);
-                        self.handle_combination(&Combination::Str(self.current_input.clone()));
+                        if let Some(Combination::Str(mut string)) = self.current_input.take() {
+                            string.push(c);
+                            Some(Combination::Str(string))
+                        } else { Some(Combination::Str(c.to_string())) }
                     },
-                    _ => {},
+                    _ => None,
                 };
+
+                self.current_input = self.handle_combination(combination);
             } else if self.mode == Mode::Input {}
         }
     }
 
-    // Returns whether to terminate
-    fn handle_combination(&mut self, combination: &Combination) {
-        let mut found_matches = matches_that_start_with(
-            combination, &self.possible_inputs);
-        let found_exact = exact_match(&found_matches, combination);
-        if found_exact {
-            let (_, command) = found_matches.pop().unwrap();
-            let terminate = Overseer::handle_command(&mut self.system, command);
-            if terminate { self.terminated = true; }
+    // Returns the new current_input
+    fn handle_combination(&mut self, combination: Option<Combination>) -> Option<Combination> {
+        if let Some(combination) = combination {
+            if let Some(matches) = self.possible_inputs.get(&combination) {
+                if !exact_match(matches, &combination) { return Some(combination); }
+                let (_, command) = matches[0];
+                let terminate = Overseer::handle_command(&mut self.system, &command);
+                if terminate { self.terminated = true; }
+            }
         }
-
-        if found_exact || found_matches.is_empty() {
-            self.current_input.clear();
-        }
+        None
     }
 
     fn handle_command(system: &mut System, command: &Command) -> bool {
         let mut terminate = false;
         match command {
-            Command::Terminate          => terminate = true,
+            // Command::Terminate          => terminate = true,
             Command::Up(n)              => for _ in 0..*n {system.up()},
             Command::Down(n)            => for _ in 0..*n {system.down()},
             Command::Left               => system.left(),

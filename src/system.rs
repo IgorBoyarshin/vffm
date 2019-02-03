@@ -1090,7 +1090,7 @@ impl System {
     }
 //-----------------------------------------------------------------------------
     pub fn draw_available_matches(&self, cs: &mut ColorSystem,
-            matches: &Vec<&Match>, completion_count: usize) {
+            matches: &Vec<Match>, completion_count: usize) {
         if matches.is_empty() { return; }
 
         // Borders
