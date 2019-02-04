@@ -731,11 +731,11 @@ impl System {
 
     fn common_left_right(&mut self) {
         self.context_mut().cumulative_size_text = None;
-        self.context_mut().current_permissions = self.get_current_permissions();
         self.context_mut().right_column = self.collect_right_column_of_current();
         self.context_mut().current_siblings = self.collect_sorted_children_of_parent();
         self.context_mut().parent_siblings = self.collect_sorted_siblings_of_parent();
         self.context_mut().additional_entry_info = self.get_additional_entry_info_for_current();
+        self.context_mut().current_permissions = self.get_current_permissions();
         self.update_current_tab_name();
     }
 //-----------------------------------------------------------------------------
