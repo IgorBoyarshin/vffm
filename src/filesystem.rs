@@ -1,6 +1,6 @@
 // use std::path::Path;
 use std::path::PathBuf;
-use std::fs::{self, DirEntry};
+use std::fs::{self, DirEntry, Metadata};
 use std::io::BufReader;
 use std::io::BufRead;
 use std::ffi::OsStr;
@@ -8,25 +8,28 @@ use std::ffi::OsStr;
 //-----------------------------------------------------------------------------
 // use std::time::{SystemTime};
 // use std::time::{UNIX_EPOCH};
-use std::fs::OpenOptions;
+// use std::fs::OpenOptions;
+// use std::io::{Write};
+use std::io::{Read};
 use std::fs::File;
 use std::os::unix::fs::PermissionsExt;
-use std::io::{Write, Read};
 
-pub fn log(s: &str) {
-    // let name = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string();
-    let name = "log.txt";
-    let mut file = OpenOptions::new().append(true).create(true).open(name).unwrap();
-    file.write_all(s.as_bytes()).unwrap();
-    file.write_all(b"\n").unwrap();
-}
+// pub fn log(s: &str) {
+//     // let name = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string();
+//     let name = "log.txt";
+//     let mut file = OpenOptions::new().append(true).create(true).open(name).unwrap();
+//     file.write_all(s.as_bytes()).unwrap();
+//     file.write_all(b"\n").unwrap();
+// }
 //-----------------------------------------------------------------------------
+#[derive(Clone)]
 pub struct Permissions {
-    owner: u32,
-    group: u32,
-    world: u32,
-    is_directory: bool,
-    is_symlink: bool,
+    pub owner: u32,
+    pub group: u32,
+    pub world: u32,
+    pub is_directory: bool,
+    pub is_symlink: bool,
+    pub is_partially_executable: bool,
 }
 
 impl Permissions {
@@ -38,6 +41,17 @@ impl Permissions {
         let group = permission_number_to_string_representation(self.group);
         let world = permission_number_to_string_representation(self.world);
         dir + &owner + &group + &world
+    }
+
+    fn empty() -> Permissions {
+        Permissions {
+            owner: 0,
+            group: 0,
+            world: 0,
+            is_directory: false,
+            is_symlink: false,
+            is_partially_executable: false,
+        }
     }
 }
 
@@ -60,16 +74,7 @@ fn permission_number_to_string_representation(mut n: u32) -> String {
     s
 }
 
-pub fn permissions_of(path: &PathBuf) -> Permissions {
-    let metadata = fs::symlink_metadata(path);
-    if metadata.is_err() { return Permissions {
-        owner: 0,
-        group: 0,
-        world: 0,
-        is_directory: false,
-        is_symlink: false,
-    }};
-    let metadata = metadata.unwrap();
+fn permissions_from_metadata(metadata: Metadata) -> Permissions {
     let is_file = metadata.is_file();
     let is_directory = metadata.is_dir();
     let is_symlink = !(is_file || is_directory);
@@ -77,14 +82,22 @@ pub fn permissions_of(path: &PathBuf) -> Permissions {
     let world = field % 8;
     let group = (field / 8) % 8;
     let owner = (field / (8*8)) % 8;
+    let is_partially_executable = (world % 2 == 1) || (group % 2 == 1) || (owner % 2 == 1);
     Permissions {
         owner,
         group,
         world,
         is_directory,
         is_symlink,
+        is_partially_executable,
     }
 }
+
+// pub fn permissions_of(path: &PathBuf) -> Permissions {
+//     let metadata = fs::symlink_metadata(path);
+//     if metadata.is_err() { Permissions::empty() }
+//     else                 { permissions_from_metadata(metadata.unwrap()) }
+// }
 //-----------------------------------------------------------------------------
 // pub fn modify_time(path: &PathBuf) -> u64 {
 //     fs::metadata(path).expect("Could not read metadata")
@@ -116,15 +129,16 @@ pub struct Entry {
     pub name: String,
     pub size: u64,
     pub time_modified: u64,
+    pub permissions: Permissions,
 }
 
 impl Entry {
     pub fn is_symlink(&self) -> bool {
         self.entrytype == EntryType::Symlink
     }
-    pub fn is_regular(&self) -> bool {
-        self.entrytype == EntryType::Regular
-    }
+    // pub fn is_regular(&self) -> bool {
+    //     self.entrytype == EntryType::Regular
+    // }
     pub fn is_dir(&self) -> bool {
         self.entrytype == EntryType::Directory
     }
@@ -230,6 +244,7 @@ pub fn collect_siblings_of(path: &PathBuf) -> Vec<Entry> {
             name: "/".to_string(),
             size: 4096,
             time_modified: 0,
+            permissions: Permissions::empty(),
         }]
     } else {
         let mut path = path.clone();
@@ -243,8 +258,7 @@ fn into_entry(dir_entry: DirEntry) -> Entry {
     let name = dir_entry.file_name().to_str().unwrap().to_string();
     let meta = dir_entry.metadata().expect(&format!("Could not read metadata for {}", name));
     let size = meta.len();
-    // let time_modified = meta.modified().expect("Could not read modified time")
-    //     .duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let permissions = permissions_from_metadata(meta);
     let entrytype = {
         let ft = dir_entry.file_type().expect("Could not retrieve filetype");
         if ft.is_file()         { EntryType::Regular }
@@ -258,6 +272,7 @@ fn into_entry(dir_entry: DirEntry) -> Entry {
         name,
         size,
         time_modified: 0,
+        permissions,
     }
 }
 
@@ -285,60 +300,6 @@ pub fn cumulative_size(path: &PathBuf) -> Size {
             .sum()
     } else { size(path) }
 }
-
-// pub fn first_entry_inside(pathbuf: &PathBuf) -> Option<Entry> {
-//     let result = fs::read_dir(pathbuf)
-//         .expect(&format!("Could not read dir{}", pathbuf.to_str().expect("")))
-//         .nth(0);
-//     if let Some(entry) = result {
-//         Some(into_entry(entry.unwrap()))
-//     } else { None }
-// }
-
-// pub fn index_of_name_inside(pathbuf: &PathBuf, name: &str) -> Option<usize> {
-//     let result = fs::read_dir(pathbuf)
-//         .expect(&format!("Could not read dir{}", pathbuf.to_str().expect("")))
-//         .into_iter()
-//         .map(|elem| elem.unwrap().file_name().to_str().unwrap().to_string())
-//         .enumerate()
-//         .find(|(_, elem)| elem == &name);
-//     if let Some((index, _)) = result {
-//         Some(index)
-//     } else { None }
-// }
-
-// pub fn index_inside(path: &PathBuf) -> usize {
-//     if is_root(path) { return 0; }
-//
-//     let name = path.file_name().unwrap().to_str().unwrap();
-//     let parent = path.parent().unwrap().to_path_buf();
-//     index_of_name_inside(&parent, name).unwrap()
-// }
-
-// pub fn get_parent_index(path: &PathBuf) -> usize {
-//     if is_root(path) {
-//         panic!("get_parent_index: given path is root");
-//     }
-//
-//     let parent = path.parent().unwrap();
-//     let parent_name = parent.file_name();
-//     if let None = parent_name {
-//         return 0; // the index of '/' is always 0 (it is the only one there)
-//     }
-//     let parent_name = parent_name.unwrap().to_str().unwrap();
-//     0
-// }
-
-// pub fn files_count_in_dir(pathbuf: &PathBuf) -> usize {
-//     fs::read_dir(pathbuf)
-//         .expect(&format!("Could not read dir{}", pathbuf.to_str().expect("")))
-//         .count()
-// }
-//
-// pub fn absolute_path() -> String {
-//     std::env::current_exe().expect("Cannot get absolute path")
-//         .to_str().unwrap().to_string()
-// }
 
 pub fn absolute_pathbuf() -> PathBuf {
     std::env::current_exe().expect("Cannot get absolute PathBuf")

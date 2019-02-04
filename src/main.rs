@@ -98,9 +98,9 @@ impl Overseer {
         else if let Some(input) = input {
             if self.mode == Mode::AwaitingCommand {
                 let combination = match input {
-                    Input::Tab => Some(Combination::Tab),
+                    Input::Tab      => Some(Combination::Tab),
                     Input::ShiftTab => Some(Combination::ShiftTab),
-                    Input::Char(c) => {
+                    Input::Char(c)  => {
                         if let Some(Combination::Str(mut string)) = self.current_input.take() {
                             string.push(c);
                             Some(Combination::Str(string))

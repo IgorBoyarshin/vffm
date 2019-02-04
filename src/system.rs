@@ -138,9 +138,8 @@ impl System {
             parent_index,
             current_index,
             parent_siblings,
-            current_permissions: System::string_permissions_for_path(&first_entry_path),
-            additional_entry_info: System::get_additional_entry_info(first_entry_ref,
-                                                     &first_entry_path, &right_column),
+            current_permissions: System::string_permissions_for_entry(&first_entry_ref),
+            additional_entry_info: System::get_additional_entry_info(first_entry_ref, &first_entry_path),
             current_siblings,
             right_column,
             // additional_entry_info: System::get_symlink_target(&first_entry_path),
@@ -460,24 +459,23 @@ impl System {
         entries
     }
 //-----------------------------------------------------------------------------
-    fn string_permissions_for_path(path: &Option<PathBuf>) -> String {
-        if let Some(path) = path {
-            permissions_of(path).string_representation()
+    fn string_permissions_for_entry(entry: &Option<&Entry>) -> String {
+        if let Some(entry) = entry {
+            entry.permissions.string_representation()
         } else { "".to_string() }
     }
 
     fn get_current_permissions(&mut self) -> String {
-        System::string_permissions_for_path(&self.context_ref().current_path)
+        System::string_permissions_for_entry(&self.current_entry_ref())
     }
 
     fn get_additional_entry_info_for_current(&self) -> Option<String> {
         let context = self.context_ref();
-        System::get_additional_entry_info(self.current_entry_ref(),
-                        &context.current_path, &context.right_column)
+        System::get_additional_entry_info(self.current_entry_ref(), &context.current_path)
     }
 
-    fn get_additional_entry_info(entry: Option<&Entry>, path: &Option<PathBuf>,
-                                 right_column: &RightColumn) -> Option<String> {
+    fn get_additional_entry_info(entry: Option<&Entry>, path: &Option<PathBuf>)
+            -> Option<String> {
         if let Some(entry) = entry {
             if entry.is_dir() { // get sub-entries count
                 // if let Some(siblings) = right_column.siblings_ref() {
@@ -810,13 +808,8 @@ impl System {
 //-----------------------------------------------------------------------------
     fn list_entry(&self, cs: &mut ColorSystem, column_index: usize,
             y: usize, entry: &Entry, under_cursor: bool, selected: bool) {
-        let paint = match entry.entrytype {
-            EntryType::Regular => self.settings.file_paint,
-            EntryType::Directory => self.settings.dir_paint,
-            EntryType::Symlink => self.settings.symlink_paint,
-            EntryType::Unknown => self.settings.unknown_paint,
-        };
-        let paint = System::maybe_selected_paint_from(paint, under_cursor);
+        let paint = self.paint_for(&entry.entrytype, &entry.name,
+                       entry.permissions.is_partially_executable, under_cursor);
 
         let y = y as Coord + self.display_settings.entries_display_begin;
         let (mut begin, end) = self.display_settings.columns_coord[column_index];
@@ -1192,6 +1185,38 @@ impl System {
         let mut chars = chars.skip(end - start); // skip this part in the original
         while let Some(c) = chars.next() { result.push(c); } // push the rest
         result
+    }
+
+    fn maybe_paint_by_name(name: &str) -> Option<Paint> {
+        if      name.ends_with(".cpp") { return Some(Paint::with_fg_bg(Color::Red, Color::Default).bold()) }
+        else if name.ends_with(".java") { return Some(Paint::with_fg_bg(Color::Red, Color::Default).bold()) }
+        else if name.ends_with(".rs") { return Some(Paint::with_fg_bg(Color::Red, Color::Default).bold()) }
+        else if name.ends_with(".h") { return Some(Paint::with_fg_bg(Color::Red, Color::Default)) }
+        else if name.ends_with(".pdf") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
+        else if name.ends_with(".djvu") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
+        else if name.ends_with(".mp3") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)) }
+        else if name.ends_with(".webm") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)) }
+        else if name.ends_with(".png") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)) }
+        else if name.ends_with(".gif") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)) }
+        else if name.ends_with(".jpg") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)) }
+        else if name.ends_with(".jpeg") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)) }
+        else if name.ends_with(".mkv") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
+        else if name.ends_with(".avi") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
+        else if name.ends_with(".mp4") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
+        None
+    }
+
+    fn paint_for(&self, entrytype: &EntryType, name: &str, executable: bool, under_cursor: bool) -> Paint {
+        let paint = match entrytype {
+            EntryType::Directory => self.settings.dir_paint,
+            EntryType::Symlink => self.settings.symlink_paint,
+            EntryType::Unknown => self.settings.unknown_paint,
+            EntryType::Regular =>
+                if let Some(paint) = System::maybe_paint_by_name(name) { paint }
+                else if executable { Paint::with_fg_bg(Color::Green, Color::Default).bold() }
+                else { self.settings.file_paint },
+        };
+        System::maybe_selected_paint_from(paint, under_cursor)
     }
 
     fn maybe_selected_paint_from(paint: Paint, convert: bool) -> Paint {
