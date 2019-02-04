@@ -797,6 +797,7 @@ impl System {
             if let Some((app, args, is_external)) = self.spawn_rule_for(&path) {
                 System::spawn_program(&app, args, is_external);
                 self.update_current();
+                self.window.clear(); // Otherwise the screen is not restored correctly. Need to invalidate
             }
         }
     }
