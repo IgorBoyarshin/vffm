@@ -413,7 +413,8 @@ impl System {
     }
 
     fn tab_name_from_path(path: &PathBuf) -> String {
-        osstr_to_str(path.file_name().unwrap()).to_string()
+        if path == &PathBuf::from("/") { "/".to_string() }
+        else { osstr_to_str(path.file_name().unwrap()).to_string() }
     }
 
     // Returns whether is was the last Tab (then perhaps whether we should terminate)
