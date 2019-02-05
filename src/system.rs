@@ -1,4 +1,3 @@
-// use pancurses::*;
 use pancurses::{Window, initscr, start_color, use_default_colors, noecho, half_delay, endwin, curs_set,
     ACS_CKBOARD, ACS_VLINE, ACS_HLINE, ACS_TTEE, ACS_BTEE,
     ACS_LLCORNER, ACS_LRCORNER, ACS_ULCORNER, ACS_URCORNER};
@@ -30,6 +29,7 @@ struct DirEntry {
     size: u64,
     time_modified: u64,
     permissions: Permissions,
+
     paint: Paint,
     is_selected: bool,
 }
@@ -41,7 +41,7 @@ impl DirEntry {
         (entry.permissions.owner % 2 == 1)
     }
 
-    fn from_entry(entry: Entry, paint_settings: &PaintSettings) -> DirEntry {
+    fn from_entry(entry: Entry, paint_settings: &PaintSettings, is_selected: bool) -> DirEntry {
         let executable = DirEntry::is_partially_executable(&entry);
         let paint = paint_for(&entry.entrytype, &entry.name, executable, paint_settings);
         DirEntry {
@@ -51,7 +51,7 @@ impl DirEntry {
             time_modified: entry.time_modified,
             permissions: entry.permissions,
             paint,
-            is_selected: false,
+            is_selected,
         }
     }
 
@@ -66,12 +66,13 @@ impl DirEntry {
     }
 }
 
-fn paint_for(entrytype: &EntryType, name: &str, executable: bool, paint_settings: &PaintSettings) -> Paint {
+fn paint_for(entrytype: &EntryType, name: &str,
+        executable: bool, paint_settings: &PaintSettings) -> Paint {
     match entrytype {
         EntryType::Directory => paint_settings.dir_paint,
-        EntryType::Symlink => paint_settings.symlink_paint,
-        EntryType::Unknown => paint_settings.unknown_paint,
-        EntryType::Regular =>
+        EntryType::Symlink   => paint_settings.symlink_paint,
+        EntryType::Unknown   => paint_settings.unknown_paint,
+        EntryType::Regular   =>
             if let Some(paint) = maybe_paint_by_name(name) { paint }
             else if executable { Paint::with_fg_bg(Color::Green, Color::Default).bold() }
             else { paint_settings.file_paint },
@@ -79,21 +80,21 @@ fn paint_for(entrytype: &EntryType, name: &str, executable: bool, paint_settings
 }
 
 fn maybe_paint_by_name(name: &str) -> Option<Paint> {
-    if      name.ends_with(".cpp") { return Some(Paint::with_fg_bg(Color::Red, Color::Default).bold()) }
-    else if name.ends_with(".java") { return Some(Paint::with_fg_bg(Color::Red, Color::Default).bold()) }
-    else if name.ends_with(".rs") { return Some(Paint::with_fg_bg(Color::Red, Color::Default).bold()) }
-    else if name.ends_with(".h") { return Some(Paint::with_fg_bg(Color::Red, Color::Default)) }
-    else if name.ends_with(".pdf") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
+    if      name.ends_with(".cpp")  { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
+    else if name.ends_with(".java") { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
+    else if name.ends_with(".rs")   { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
+    else if name.ends_with(".h")    { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
+    else if name.ends_with(".pdf")  { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
     else if name.ends_with(".djvu") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
-    else if name.ends_with(".mp3") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)) }
-    else if name.ends_with(".webm") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)) }
-    else if name.ends_with(".png") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)) }
-    else if name.ends_with(".gif") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)) }
-    else if name.ends_with(".jpg") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)) }
-    else if name.ends_with(".jpeg") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)) }
-    else if name.ends_with(".mkv") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
-    else if name.ends_with(".avi") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
-    else if name.ends_with(".mp4") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
+    else if name.ends_with(".mp3")  { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)       ) }
+    else if name.ends_with(".webm") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)       ) }
+    else if name.ends_with(".png")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
+    else if name.ends_with(".gif")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
+    else if name.ends_with(".jpg")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
+    else if name.ends_with(".jpeg") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
+    else if name.ends_with(".mkv")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
+    else if name.ends_with(".avi")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
+    else if name.ends_with(".mp4")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
     None
 }
 
@@ -162,11 +163,12 @@ impl System {
         let window = System::setup();
         System::set_drawing_delay(DrawingDelay::Regular);
 
+        let selected = Vec::new();
         let sorting_type = SortingType::Lexicographically;
         let display_settings = System::generate_display_settings(
             &window, settings.scrolling_gap, &settings.columns_ratio);
         let context = System::generate_context(starting_path, &display_settings,
-                                           &settings.paint_settings, &sorting_type);
+                               &settings.paint_settings, &sorting_type, &selected);
 
         System {
             window,
@@ -181,7 +183,7 @@ impl System {
             transfers: Vec::new(),
             potential_transfer_data: None,
 
-            selected: Vec::new(),
+            selected,
 
             tabs: vec![Tab { name: System::tab_name_from_path(&context.parent_path), context }],
             current_tab_index: 0,
@@ -190,32 +192,44 @@ impl System {
 //-----------------------------------------------------------------------------
     fn generate_context_for(&mut self, path: PathBuf) -> Context {
         System::generate_context(path, &self.display_settings,
-                             &self.settings.paint_settings, &self.sorting_type)
+            &self.settings.paint_settings, &self.sorting_type, &self.selected)
     }
 
-    fn generate_context(starting_path: PathBuf, display_settings: &DisplaySettings,
-            paint_settings: &PaintSettings, sorting_type: &SortingType) -> Context {
-        let current_siblings = System::into_sorted_direntries(collect_maybe_dir(&starting_path, None),
-            paint_settings, sorting_type);
-        let parent_siblings = System::into_sorted_direntries(collect_siblings_of(&starting_path),
-            paint_settings, sorting_type);
-        let first_entry_path =
-            System::path_of_nth_entry_inside(0, &starting_path, &current_siblings);
+    fn generate_context(parent_path: PathBuf,
+                        display_settings: &DisplaySettings,
+                        paint_settings: &PaintSettings,
+                        sorting_type: &SortingType,
+                        selected: &Vec<PathBuf>) -> Context {
+        let current_siblings =
+            System::into_sorted_direntries(
+                collect_maybe_dir(&parent_path, None),
+                paint_settings, sorting_type,
+                selected, Some(&parent_path));
+        let parent_siblings =
+            System::into_sorted_direntries(
+               collect_siblings_of(&parent_path),
+               paint_settings, sorting_type, selected,
+               System::maybe_parent(&parent_path).as_ref());
+        let first_entry_path = System::path_of_nth_entry_inside(0, &parent_path, &current_siblings);
         let first_entry_ref = System::nth_entry_inside(0, &current_siblings);
-        let parent_index = System::index_of_entry_inside(&starting_path, &parent_siblings).unwrap();
+        let parent_index = System::index_of_entry_inside(&parent_path, &parent_siblings).unwrap();
         let current_index = 0;
         let column_index = 2;
         let (begin, end) = display_settings.columns_coord[column_index];
         let column_width = (end - begin) as usize;
-        let right_column = System::collect_right_column(
-                        &first_entry_path, paint_settings, sorting_type,
-                        display_settings.column_effective_height, column_width);
-
-        let parent_siblings_shift = System::siblings_shift_for(
-                display_settings.scrolling_gap, display_settings.column_effective_height,
+        let right_column =
+            System::collect_right_column(
+                &first_entry_path, paint_settings, sorting_type,
+                display_settings.column_effective_height, column_width, selected);
+        let parent_siblings_shift =
+            System::siblings_shift_for(
+                display_settings.scrolling_gap,
+                display_settings.column_effective_height,
                 parent_index, parent_siblings.len(), None);
-        let current_siblings_shift = System::siblings_shift_for(
-                display_settings.scrolling_gap, display_settings.column_effective_height,
+        let current_siblings_shift =
+            System::siblings_shift_for(
+                display_settings.scrolling_gap,
+                display_settings.column_effective_height,
                 current_index, current_siblings.len(), None);
         Context {
             parent_index,
@@ -225,9 +239,8 @@ impl System {
             additional_entry_info: System::get_additional_entry_info(first_entry_ref, &first_entry_path),
             current_siblings,
             right_column,
-            // additional_entry_info: System::get_symlink_target(&first_entry_path),
             current_path: first_entry_path,
-            parent_path: starting_path,
+            parent_path,
 
             parent_siblings_shift,
             current_siblings_shift,
@@ -273,16 +286,19 @@ impl System {
         let column_width = (end - begin) as usize;
         let current_path = &self.context_ref().current_path;
         System::collect_right_column(current_path, &self.settings.paint_settings, &self.sorting_type,
-                     self.display_settings.column_effective_height, column_width)
+                     self.display_settings.column_effective_height, column_width, &self.selected)
     }
 
     fn collect_right_column(path_opt: &Option<PathBuf>,
             paint_settings: &PaintSettings, sorting_type: &SortingType,
-            max_height: usize, max_width: usize) -> RightColumn {
+            max_height: usize, max_width: usize,
+            selected: &Vec<PathBuf>) -> RightColumn {
         if let Some(path) = path_opt {
             if path.is_dir() { // resolved path
                 return RightColumn::with_siblings(
-                    System::collect_sorted_children_of(path_opt, paint_settings, sorting_type, max_height));
+                    System::into_sorted_direntries(
+                        collect_maybe_dir(&path, Some(max_height)),
+                        paint_settings, sorting_type, selected, Some(&path)));
             } else { // resolved path is a regular file
                 let path = maybe_resolve_symlink_recursively(path);
                 if let Some(preview) = System::read_preview_of(&path, max_height) {
@@ -591,15 +607,17 @@ impl System {
         None
     }
 
-    // fn get_symlink_target_for_current(&self) -> Option<String> {
-    //     System::get_symlink_target(&self.context.current_path)
-    // }
-
     fn current_entry_ref(&self) -> Option<&DirEntry> {
         if self.context_ref().current_path.is_some() {
             Some(self.unsafe_current_entry_ref())
         } else { None }
     }
+
+    // fn current_entry_mut(&mut self) -> Option<&mut DirEntry> {
+    //     if self.context_ref().current_path.is_some() {
+    //         Some(self.unsafe_current_entry_mut())
+    //     } else { None }
+    // }
 
     fn unsafe_current_entry_ref(&self) -> &DirEntry {
         self.context_ref().current_siblings.get(self.context_ref().current_index).unwrap()
@@ -609,11 +627,6 @@ impl System {
         let index = self.context_ref().current_index;
         self.context_mut().current_siblings.get_mut(index).unwrap()
     }
-
-    // fn current_is_dir(&self) -> bool {
-    //     if self.inside_empty_dir() { return false; }
-    //     self.unsafe_current_entry_ref().is_dir()
-    // }
 
     fn current_tab_ref(&self) -> &Tab {
         self.tabs.get(self.current_tab_index).unwrap()
@@ -649,16 +662,6 @@ impl System {
         if n >= entries.len() { return None; }
         Some(entries.get(n).unwrap())
     }
-
-    // fn current_is_dir_or_symlink(&self) -> bool {
-    //     if self.current_path.is_some() {
-    //         System::is_dir_or_symlink(self.current_path.as_ref().unwrap())
-    //     } else { false }
-    // }
-
-    // fn is_dir_or_symlink(path: &PathBuf) -> bool {
-    //     !path.is_file()
-    // }
 //-----------------------------------------------------------------------------
     // Update all, affectively reloading everything
     fn update(&mut self) {
@@ -730,41 +733,48 @@ impl System {
         if self.transfers.is_empty() { System::set_drawing_delay(DrawingDelay::Regular); }
     }
 //-----------------------------------------------------------------------------
-    fn into_direntries(entries: Vec<Entry>, paint_settings: &PaintSettings) -> Vec<DirEntry> {
-        entries.into_iter().map(|entry| DirEntry::from_entry(entry, paint_settings)).collect()
+    fn into_direntries(entries: Vec<Entry>, paint_settings: &PaintSettings,
+            selected: &Vec<PathBuf>, parent_path: Option<&PathBuf>) -> Vec<DirEntry> {
+        entries.into_iter().map(|entry| {
+            let is_selected = System::is_selected(selected, &entry.name, parent_path);
+            DirEntry::from_entry(entry, paint_settings, is_selected)
+        }).collect()
     }
 
-    fn into_sorted_direntries(entries: Vec<Entry>, paint_settings: &PaintSettings,
-            sorting_type: &SortingType) -> Vec<DirEntry> {
-        System::sort(System::into_direntries(entries, paint_settings), sorting_type)
+    fn is_selected(selected: &Vec<PathBuf>, name: &str, parent_path: Option<&PathBuf>) -> bool {
+        if let Some(parent_path) = parent_path {
+            return selected.iter().any(|item| item.ends_with(name) // check partially
+                                && *item == parent_path.join(name)); // verify
+        } else { false }
+    }
+
+    fn maybe_parent(path: &PathBuf) -> Option<PathBuf> {
+        if path_to_str(path) == "/" { None }
+        else { Some(path.parent().unwrap().to_path_buf()) }
+    }
+
+    fn into_sorted_direntries(entries: Vec<Entry>,
+                              paint_settings: &PaintSettings,
+                              sorting_type: &SortingType,
+                              selected: &Vec<PathBuf>,
+                              parent_path: Option<&PathBuf>) -> Vec<DirEntry> {
+        let entries = System::into_direntries(entries, paint_settings, selected, parent_path);
+        System::sort(entries, sorting_type)
     }
 
     fn collect_sorted_siblings_of_parent(&self) -> Vec<DirEntry> {
+        let grandparent = System::maybe_parent(&self.context_ref().parent_path);
         System::into_sorted_direntries(
             collect_siblings_of(&self.context_ref().parent_path),
-            &self.settings.paint_settings, &self.sorting_type)
+            &self.settings.paint_settings, &self.sorting_type,
+            &self.selected, grandparent.as_ref())
     }
-
-    // TODO: mb get rid of Option
-    fn collect_sorted_children_of(path: &Option<PathBuf>,
-                                  paint_settings: &PaintSettings,
-                                  sorting_type: &SortingType,
-                                  max_count: usize) -> Vec<DirEntry> {
-        if let Some(path) = path {
-            System::into_sorted_direntries(
-                collect_maybe_dir(&path, Some(max_count)),
-                paint_settings, sorting_type)
-        } else { Vec::new() }
-    }
-
-    // fn collect_sorted_children_of_current(&self) -> Vec<DirEntry> {
-    //     System::collect_sorted_children_of(&self.current_path, &self.sorting_type)
-    // }
 
     fn collect_sorted_children_of_parent(&self) -> Vec<DirEntry> {
         System::into_sorted_direntries(
             collect_maybe_dir(&self.context_ref().parent_path, None),
-            &self.settings.paint_settings, &self.sorting_type)
+            &self.settings.paint_settings, &self.sorting_type,
+            &self.selected, Some(&self.context_ref().parent_path)) // TODO: CHECK
     }
 
     // The display is guaranteed to be able to contain 2*gap (accomplished in settings)
@@ -946,46 +956,38 @@ impl System {
     }
 
     fn list_entries(&self, mut cs: &mut ColorSystem, column_index: usize,
-            entries: &Vec<DirEntry>, cursor_index: Option<usize>, shift: usize, path_to_dir: Option<&PathBuf>) {
+            entries: &Vec<DirEntry>, cursor_index: Option<usize>, shift: usize) {
         for (index, entry) in entries.into_iter().enumerate()
                 .skip(shift).take(self.display_settings.column_effective_height) {
             let under_cursor = match cursor_index {
                 Some(i) => (i == index),
                 None    => false,
             };
-            let selected = if let Some(path_to_dir) = path_to_dir {
-                self.is_selected_by_name(&entry.name, path_to_dir)
-            } else { false };
-
-            self.list_entry(&mut cs, column_index, index - shift, &entry, under_cursor, selected);
+            self.list_entry(&mut cs, column_index, index - shift,
+                            &entry, under_cursor, entry.is_selected);
         }
     }
 
-    fn is_selected_by_name(&self, name: &str, path: &PathBuf) -> bool {
-        for item in self.selected.iter() {
-            if item.ends_with(name) { // check partialy
-                if path_to_str(item) == path_to_str(&path.join(name)) { // verify
-                    return true;
-                }
-            }
-        }
-
-        false
+    fn maybe_index_of_selected(path: &PathBuf, selected: &Vec<PathBuf>) -> Option<usize> {
+        selected.iter().enumerate()
+            .find(|(_, item)| *item == path)
+            .map(|(index, _)| index)
     }
 
-    fn maybe_index_of_selected(&self, path: &PathBuf) -> Option<usize> {
-        for (index, item) in self.selected.iter().enumerate() {
-            if path_to_str(item) == path_to_str(path) { return Some(index); }
-        }
-        None
+    fn maybe_index_of_self_selected(&self, path: &PathBuf) -> Option<usize> {
+        System::maybe_index_of_selected(path, &self.selected)
     }
 
     pub fn select_under_cursor(&mut self) {
         if let Some(path) = self.context_ref().current_path.as_ref() {
-            if let Some(index) = self.maybe_index_of_selected(path) {
+            if let Some(index) = self.maybe_index_of_self_selected(path) {
                 self.selected.remove(index);
+                assert!(self.unsafe_current_entry_mut().is_selected);
+                self.unsafe_current_entry_mut().is_selected = false;
             } else {
                 self.selected.push(path.clone());
+                assert!(!self.unsafe_current_entry_mut().is_selected);
+                self.unsafe_current_entry_mut().is_selected = true;
             }
         }
     }
@@ -993,10 +995,30 @@ impl System {
     pub fn clear_selection(&mut self) {
         self.selected.clear();
         self.potential_transfer_data = None;
+
+        // Unselect all siblings
+        self.context_mut().parent_siblings.iter_mut().for_each(|e| e.is_selected = false);
+        self.context_mut().current_siblings.iter_mut().for_each(|e| e.is_selected = false);
+        if let Some(siblings) = self.context_mut().right_column.siblings_mut() {
+            siblings.iter_mut().for_each(|e| e.is_selected = false);
+        }
     }
 
-    pub fn invert_selection(&self) {
-        // TODO
+    pub fn invert_selection(&mut self) {
+        // Leave only those that are not from current dir
+        let parent_path = self.context_ref().parent_path.clone();
+        self.selected.retain(|path| path.parent().unwrap() != parent_path);
+
+        // Flip selection
+        self.context_mut().current_siblings.iter_mut()
+            .for_each(|e| e.is_selected = !e.is_selected);
+
+        // Add new selected ones to the selected list
+        self.selected.append(
+            &mut self.context_ref().current_siblings.iter()
+                .filter(|entry| entry.is_selected)
+                .map(|e| parent_path.join(&e.name))
+                .collect());
     }
 //-----------------------------------------------------------------------------
     fn clear(&self, cs: &mut ColorSystem) {
@@ -1067,16 +1089,8 @@ impl System {
     fn draw_left_column(&self, mut cs: &mut ColorSystem) {
         let column_index = 0;
         let context = self.context_ref();
-        if path_to_str(&context.parent_path) == "/" {
-            self.list_entries(&mut cs, column_index, &context.parent_siblings,
-                Some(context.parent_index), context.parent_siblings_shift,
-                None);
-        } else {
-            let grandparent = context.parent_path.parent().unwrap().to_path_buf();
-            self.list_entries(&mut cs, column_index, &context.parent_siblings,
-                Some(context.parent_index), context.parent_siblings_shift,
-                Some(&grandparent));
-        };
+        self.list_entries(&mut cs, column_index, &context.parent_siblings,
+                Some(context.parent_index), context.parent_siblings_shift);
     }
 
     fn draw_middle_column(&self, mut cs: &mut ColorSystem) {
@@ -1086,8 +1100,7 @@ impl System {
         } else {
             let context = self.context_ref();
             self.list_entries(&mut cs, column_index, &context.current_siblings,
-                Some(context.current_index), context.current_siblings_shift,
-                Some(&context.parent_path));
+                Some(context.current_index), context.current_siblings_shift);
         }
     }
 
@@ -1098,8 +1111,7 @@ impl System {
             if siblings.is_empty() {
                 self.draw_empty_sign(&mut cs, column_index);
             } else {
-                self.list_entries(&mut cs, column_index, siblings, None, 0,
-                                  Some(self.context_ref().current_path.as_ref().unwrap()));
+                self.list_entries(&mut cs, column_index, siblings, None, 0);
             }
         } else if let Some(preview) = self.context_ref().right_column.preview_ref() {
             let (begin, _) = self.display_settings.columns_coord[column_index];
@@ -1493,6 +1505,10 @@ impl RightColumn {
 
     fn siblings_ref(&self) -> Option<&Vec<DirEntry>> {
         self.siblings.as_ref()
+    }
+
+    fn siblings_mut(&mut self) -> Option<&mut Vec<DirEntry>> {
+        self.siblings.as_mut()
     }
 
     fn preview_ref(&self) -> Option<&Vec<String>> {
