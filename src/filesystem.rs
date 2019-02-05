@@ -29,7 +29,6 @@ pub struct Permissions {
     pub world: u32,
     pub is_directory: bool,
     pub is_symlink: bool,
-    pub is_partially_executable: bool,
 }
 
 impl Permissions {
@@ -50,7 +49,6 @@ impl Permissions {
             world: 0,
             is_directory: false,
             is_symlink: false,
-            is_partially_executable: false,
         }
     }
 }
@@ -82,14 +80,12 @@ fn permissions_from_metadata(metadata: Metadata) -> Permissions {
     let world = field % 8;
     let group = (field / 8) % 8;
     let owner = (field / (8*8)) % 8;
-    let is_partially_executable = (world % 2 == 1) || (group % 2 == 1) || (owner % 2 == 1);
     Permissions {
         owner,
         group,
         world,
         is_directory,
         is_symlink,
-        is_partially_executable,
     }
 }
 
@@ -249,7 +245,7 @@ pub fn collect_siblings_of(path: &PathBuf) -> Vec<Entry> {
     } else {
         let mut path = path.clone();
         path.pop();
-        collect_maybe_dir(&path, None)
+        collect_maybe_dir(&path, None, )
     }
 }
 

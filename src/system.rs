@@ -16,13 +16,91 @@ use crate::filesystem::*;
 use crate::input::*;
 
 
-//-----------------------------------------------------------------------------
-pub struct Settings {
-    pub primary_paint: Paint,
+pub struct PaintSettings {
     pub dir_paint: Paint,
     pub symlink_paint: Paint,
     pub file_paint: Paint,
     pub unknown_paint: Paint,
+}
+
+#[derive(Clone)]
+struct DirEntry {
+    entrytype: EntryType,
+    name: String,
+    size: u64,
+    time_modified: u64,
+    permissions: Permissions,
+    paint: Paint,
+    is_selected: bool,
+}
+
+impl DirEntry {
+    fn is_partially_executable(entry: &Entry) -> bool {
+        (entry.permissions.world % 2 == 1) ||
+        (entry.permissions.group % 2 == 1) ||
+        (entry.permissions.owner % 2 == 1)
+    }
+
+    fn from_entry(entry: Entry, paint_settings: &PaintSettings) -> DirEntry {
+        let executable = DirEntry::is_partially_executable(&entry);
+        let paint = paint_for(&entry.entrytype, &entry.name, executable, paint_settings);
+        DirEntry {
+            entrytype: entry.entrytype,
+            name: entry.name,
+            size: entry.size,
+            time_modified: entry.time_modified,
+            permissions: entry.permissions,
+            paint,
+            is_selected: false,
+        }
+    }
+
+    fn is_symlink(&self) -> bool {
+        self.entrytype == EntryType::Symlink
+    }
+    // fn is_regular(&self) -> bool {
+    //     self.entrytype == EntryType::Regular
+    // }
+    fn is_dir(&self) -> bool {
+        self.entrytype == EntryType::Directory
+    }
+}
+
+fn paint_for(entrytype: &EntryType, name: &str, executable: bool, paint_settings: &PaintSettings) -> Paint {
+    match entrytype {
+        EntryType::Directory => paint_settings.dir_paint,
+        EntryType::Symlink => paint_settings.symlink_paint,
+        EntryType::Unknown => paint_settings.unknown_paint,
+        EntryType::Regular =>
+            if let Some(paint) = maybe_paint_by_name(name) { paint }
+            else if executable { Paint::with_fg_bg(Color::Green, Color::Default).bold() }
+            else { paint_settings.file_paint },
+    }
+}
+
+fn maybe_paint_by_name(name: &str) -> Option<Paint> {
+    if      name.ends_with(".cpp") { return Some(Paint::with_fg_bg(Color::Red, Color::Default).bold()) }
+    else if name.ends_with(".java") { return Some(Paint::with_fg_bg(Color::Red, Color::Default).bold()) }
+    else if name.ends_with(".rs") { return Some(Paint::with_fg_bg(Color::Red, Color::Default).bold()) }
+    else if name.ends_with(".h") { return Some(Paint::with_fg_bg(Color::Red, Color::Default)) }
+    else if name.ends_with(".pdf") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
+    else if name.ends_with(".djvu") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
+    else if name.ends_with(".mp3") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)) }
+    else if name.ends_with(".webm") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)) }
+    else if name.ends_with(".png") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)) }
+    else if name.ends_with(".gif") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)) }
+    else if name.ends_with(".jpg") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)) }
+    else if name.ends_with(".jpeg") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)) }
+    else if name.ends_with(".mkv") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
+    else if name.ends_with(".avi") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
+    else if name.ends_with(".mp4") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
+    None
+}
+
+//-----------------------------------------------------------------------------
+pub struct Settings {
+    pub paint_settings: PaintSettings,
+    pub primary_paint: Paint,
     pub preview_paint: Paint,
 
     pub columns_ratio: Vec<u32>,
@@ -42,8 +120,8 @@ struct DisplaySettings {
 
 #[derive(Clone)]
 struct Context {
-    current_siblings: Vec<Entry>,
-    parent_siblings: Vec<Entry>,
+    current_siblings: Vec<DirEntry>,
+    parent_siblings: Vec<DirEntry>,
     right_column: RightColumn, // depends on display_settings
 
     current_path: Option<PathBuf>,
@@ -87,7 +165,8 @@ impl System {
         let sorting_type = SortingType::Lexicographically;
         let display_settings = System::generate_display_settings(
             &window, settings.scrolling_gap, &settings.columns_ratio);
-        let context = System::generate_context(starting_path, &display_settings, &sorting_type);
+        let context = System::generate_context(starting_path, &display_settings,
+                                           &settings.paint_settings, &sorting_type);
 
         System {
             window,
@@ -110,13 +189,16 @@ impl System {
     }
 //-----------------------------------------------------------------------------
     fn generate_context_for(&mut self, path: PathBuf) -> Context {
-        System::generate_context(path, &self.display_settings, &self.sorting_type)
+        System::generate_context(path, &self.display_settings,
+                             &self.settings.paint_settings, &self.sorting_type)
     }
 
     fn generate_context(starting_path: PathBuf, display_settings: &DisplaySettings,
-            sorting_type: &SortingType) -> Context {
-        let current_siblings = System::sort(collect_maybe_dir(&starting_path, None), sorting_type);
-        let parent_siblings = System::sort(collect_siblings_of(&starting_path), sorting_type);
+            paint_settings: &PaintSettings, sorting_type: &SortingType) -> Context {
+        let current_siblings = System::into_sorted_direntries(collect_maybe_dir(&starting_path, None),
+            paint_settings, sorting_type);
+        let parent_siblings = System::into_sorted_direntries(collect_siblings_of(&starting_path),
+            paint_settings, sorting_type);
         let first_entry_path =
             System::path_of_nth_entry_inside(0, &starting_path, &current_siblings);
         let first_entry_ref = System::nth_entry_inside(0, &current_siblings);
@@ -125,8 +207,9 @@ impl System {
         let column_index = 2;
         let (begin, end) = display_settings.columns_coord[column_index];
         let column_width = (end - begin) as usize;
-        let right_column = System::collect_right_column(&first_entry_path,
-                        &sorting_type, display_settings.column_effective_height, column_width);
+        let right_column = System::collect_right_column(
+                        &first_entry_path, paint_settings, sorting_type,
+                        display_settings.column_effective_height, column_width);
 
         let parent_siblings_shift = System::siblings_shift_for(
                 display_settings.scrolling_gap, display_settings.column_effective_height,
@@ -170,10 +253,10 @@ impl System {
         }
     }
 //-----------------------------------------------------------------------------
-    fn index_of_entry_inside(path: &PathBuf, entries: &Vec<Entry>) -> Option<usize> {
+    fn index_of_entry_inside(path: &PathBuf, entries: &Vec<DirEntry>) -> Option<usize> {
         if is_root(path) { return Some(0); }
         let sought_name = path.file_name().unwrap().to_str().unwrap();
-        for (index, Entry {name, ..}) in entries.iter().enumerate() {
+        for (index, DirEntry {name, ..}) in entries.iter().enumerate() {
             if sought_name == name { return Some(index); }
         }
         None
@@ -189,16 +272,17 @@ impl System {
         let (begin, end) = self.display_settings.columns_coord[column_index];
         let column_width = (end - begin) as usize;
         let current_path = &self.context_ref().current_path;
-        System::collect_right_column(current_path, &self.sorting_type,
+        System::collect_right_column(current_path, &self.settings.paint_settings, &self.sorting_type,
                      self.display_settings.column_effective_height, column_width)
     }
 
-    fn collect_right_column(path_opt: &Option<PathBuf>, sorting_type: &SortingType,
+    fn collect_right_column(path_opt: &Option<PathBuf>,
+            paint_settings: &PaintSettings, sorting_type: &SortingType,
             max_height: usize, max_width: usize) -> RightColumn {
         if let Some(path) = path_opt {
             if path.is_dir() { // resolved path
                 return RightColumn::with_siblings(
-                    System::collect_sorted_children_of(path_opt, sorting_type, max_height));
+                    System::collect_sorted_children_of(path_opt, paint_settings, sorting_type, max_height));
             } else { // resolved path is a regular file
                 let path = maybe_resolve_symlink_recursively(path);
                 if let Some(preview) = System::read_preview_of(&path, max_height) {
@@ -451,16 +535,18 @@ impl System {
         self.update_current();
     }
 
-    fn sort(mut entries: Vec<Entry>, sorting_type: &SortingType) -> Vec<Entry> {
+    fn sort(mut entries: Vec<DirEntry>, sorting_type: &SortingType) -> Vec<DirEntry> {
         match sorting_type {
-            SortingType::Lexicographically => entries.sort_by(|a, b| a.name.cmp(&b.name)),
-            SortingType::TimeModified => entries.sort_by(|a, b| a.time_modified.cmp(&b.time_modified)),
+            SortingType::Lexicographically => entries.sort_by(
+                |a, b| a.name.cmp(&b.name)),
+            SortingType::TimeModified => entries.sort_by(
+                |a, b| a.time_modified.cmp(&b.time_modified)),
             SortingType::Any => {},
         }
         entries
     }
 //-----------------------------------------------------------------------------
-    fn string_permissions_for_entry(entry: &Option<&Entry>) -> String {
+    fn string_permissions_for_entry(entry: &Option<&DirEntry>) -> String {
         if let Some(entry) = entry {
             entry.permissions.string_representation()
         } else { "".to_string() }
@@ -475,7 +561,7 @@ impl System {
         System::get_additional_entry_info(self.current_entry_ref(), &context.current_path)
     }
 
-    fn get_additional_entry_info(entry: Option<&Entry>, path: &Option<PathBuf>)
+    fn get_additional_entry_info(entry: Option<&DirEntry>, path: &Option<PathBuf>)
             -> Option<String> {
         if let Some(entry) = entry {
             if entry.is_dir() { // get sub-entries count
@@ -509,17 +595,17 @@ impl System {
     //     System::get_symlink_target(&self.context.current_path)
     // }
 
-    fn current_entry_ref(&self) -> Option<&Entry> {
+    fn current_entry_ref(&self) -> Option<&DirEntry> {
         if self.context_ref().current_path.is_some() {
             Some(self.unsafe_current_entry_ref())
         } else { None }
     }
 
-    fn unsafe_current_entry_ref(&self) -> &Entry {
+    fn unsafe_current_entry_ref(&self) -> &DirEntry {
         self.context_ref().current_siblings.get(self.context_ref().current_index).unwrap()
     }
 
-    fn unsafe_current_entry_mut(&mut self) -> &mut Entry {
+    fn unsafe_current_entry_mut(&mut self) -> &mut DirEntry {
         let index = self.context_ref().current_index;
         self.context_mut().current_siblings.get_mut(index).unwrap()
     }
@@ -549,7 +635,7 @@ impl System {
         self.context_ref().current_path.is_none()
     }
 
-    fn path_of_nth_entry_inside(n: usize, path: &PathBuf, entries: &Vec<Entry>) -> Option<PathBuf> {
+    fn path_of_nth_entry_inside(n: usize, path: &PathBuf, entries: &Vec<DirEntry>) -> Option<PathBuf> {
         if entries.is_empty() { return None; }
         if n >= entries.len() { return None; }
         let name = entries[n].name.clone();
@@ -558,7 +644,7 @@ impl System {
         Some(path)
     }
 
-    fn nth_entry_inside(n: usize, entries: &Vec<Entry>) -> Option<&Entry> {
+    fn nth_entry_inside(n: usize, entries: &Vec<DirEntry>) -> Option<&DirEntry> {
         if entries.is_empty() { return None; }
         if n >= entries.len() { return None; }
         Some(entries.get(n).unwrap())
@@ -644,24 +730,41 @@ impl System {
         if self.transfers.is_empty() { System::set_drawing_delay(DrawingDelay::Regular); }
     }
 //-----------------------------------------------------------------------------
-    fn collect_sorted_siblings_of_parent(&self) -> Vec<Entry> {
-        System::sort(collect_siblings_of(&self.context_ref().parent_path), &self.sorting_type)
+    fn into_direntries(entries: Vec<Entry>, paint_settings: &PaintSettings) -> Vec<DirEntry> {
+        entries.into_iter().map(|entry| DirEntry::from_entry(entry, paint_settings)).collect()
+    }
+
+    fn into_sorted_direntries(entries: Vec<Entry>, paint_settings: &PaintSettings,
+            sorting_type: &SortingType) -> Vec<DirEntry> {
+        System::sort(System::into_direntries(entries, paint_settings), sorting_type)
+    }
+
+    fn collect_sorted_siblings_of_parent(&self) -> Vec<DirEntry> {
+        System::into_sorted_direntries(
+            collect_siblings_of(&self.context_ref().parent_path),
+            &self.settings.paint_settings, &self.sorting_type)
     }
 
     // TODO: mb get rid of Option
-    fn collect_sorted_children_of(path: &Option<PathBuf>, sorting_type: &SortingType,
-                                  max_count: usize) -> Vec<Entry> {
+    fn collect_sorted_children_of(path: &Option<PathBuf>,
+                                  paint_settings: &PaintSettings,
+                                  sorting_type: &SortingType,
+                                  max_count: usize) -> Vec<DirEntry> {
         if let Some(path) = path {
-            System::sort(collect_maybe_dir(&path, Some(max_count)), sorting_type)
+            System::into_sorted_direntries(
+                collect_maybe_dir(&path, Some(max_count)),
+                paint_settings, sorting_type)
         } else { Vec::new() }
     }
 
-    // fn collect_sorted_children_of_current(&self) -> Vec<Entry> {
+    // fn collect_sorted_children_of_current(&self) -> Vec<DirEntry> {
     //     System::collect_sorted_children_of(&self.current_path, &self.sorting_type)
     // }
 
-    fn collect_sorted_children_of_parent(&self) -> Vec<Entry> {
-        System::sort(collect_maybe_dir(&self.context_ref().parent_path, None), &self.sorting_type)
+    fn collect_sorted_children_of_parent(&self) -> Vec<DirEntry> {
+        System::into_sorted_direntries(
+            collect_maybe_dir(&self.context_ref().parent_path, None),
+            &self.settings.paint_settings, &self.sorting_type)
     }
 
     // The display is guaranteed to be able to contain 2*gap (accomplished in settings)
@@ -809,9 +912,8 @@ impl System {
     }
 //-----------------------------------------------------------------------------
     fn list_entry(&self, cs: &mut ColorSystem, column_index: usize,
-            y: usize, entry: &Entry, under_cursor: bool, selected: bool) {
-        let paint = self.paint_for(&entry.entrytype, &entry.name,
-                       entry.permissions.is_partially_executable, under_cursor);
+            y: usize, entry: &DirEntry, under_cursor: bool, selected: bool) {
+        let paint = System::maybe_selected_paint_from(entry.paint, under_cursor);
 
         let y = y as Coord + self.display_settings.entries_display_begin;
         let (mut begin, end) = self.display_settings.columns_coord[column_index];
@@ -844,7 +946,7 @@ impl System {
     }
 
     fn list_entries(&self, mut cs: &mut ColorSystem, column_index: usize,
-            entries: &Vec<Entry>, cursor_index: Option<usize>, shift: usize, path_to_dir: Option<&PathBuf>) {
+            entries: &Vec<DirEntry>, cursor_index: Option<usize>, shift: usize, path_to_dir: Option<&PathBuf>) {
         for (index, entry) in entries.into_iter().enumerate()
                 .skip(shift).take(self.display_settings.column_effective_height) {
             let under_cursor = match cursor_index {
@@ -1189,38 +1291,6 @@ impl System {
         result
     }
 
-    fn maybe_paint_by_name(name: &str) -> Option<Paint> {
-        if      name.ends_with(".cpp") { return Some(Paint::with_fg_bg(Color::Red, Color::Default).bold()) }
-        else if name.ends_with(".java") { return Some(Paint::with_fg_bg(Color::Red, Color::Default).bold()) }
-        else if name.ends_with(".rs") { return Some(Paint::with_fg_bg(Color::Red, Color::Default).bold()) }
-        else if name.ends_with(".h") { return Some(Paint::with_fg_bg(Color::Red, Color::Default)) }
-        else if name.ends_with(".pdf") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
-        else if name.ends_with(".djvu") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
-        else if name.ends_with(".mp3") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)) }
-        else if name.ends_with(".webm") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)) }
-        else if name.ends_with(".png") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)) }
-        else if name.ends_with(".gif") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)) }
-        else if name.ends_with(".jpg") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)) }
-        else if name.ends_with(".jpeg") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)) }
-        else if name.ends_with(".mkv") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
-        else if name.ends_with(".avi") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
-        else if name.ends_with(".mp4") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
-        None
-    }
-
-    fn paint_for(&self, entrytype: &EntryType, name: &str, executable: bool, under_cursor: bool) -> Paint {
-        let paint = match entrytype {
-            EntryType::Directory => self.settings.dir_paint,
-            EntryType::Symlink => self.settings.symlink_paint,
-            EntryType::Unknown => self.settings.unknown_paint,
-            EntryType::Regular =>
-                if let Some(paint) = System::maybe_paint_by_name(name) { paint }
-                else if executable { Paint::with_fg_bg(Color::Green, Color::Default).bold() }
-                else { self.settings.file_paint },
-        };
-        System::maybe_selected_paint_from(paint, under_cursor)
-    }
-
     fn maybe_selected_paint_from(paint: Paint, convert: bool) -> Paint {
         if convert {
             let Paint {fg, mut bg, bold: _, underlined} = paint;
@@ -1395,12 +1465,12 @@ impl SpawnPattern {
 //-----------------------------------------------------------------------------
 #[derive(Clone)]
 struct RightColumn {
-    siblings: Option<Vec<Entry>>,
+    siblings: Option<Vec<DirEntry>>,
     preview: Option<Vec<String>>,
 }
 
 impl RightColumn {
-    fn with_siblings(siblings: Vec<Entry>) -> RightColumn {
+    fn with_siblings(siblings: Vec<DirEntry>) -> RightColumn {
         RightColumn {
             siblings: Some(siblings),
             preview: None,
@@ -1421,7 +1491,7 @@ impl RightColumn {
         }
     }
 
-    fn siblings_ref(&self) -> Option<&Vec<Entry>> {
+    fn siblings_ref(&self) -> Option<&Vec<DirEntry>> {
         self.siblings.as_ref()
     }
 

@@ -40,11 +40,13 @@ impl Overseer {
             Settings {
                 columns_ratio: vec![2,3,3],
                 primary_paint: Paint::with_fg_bg(Color::White,  Color::Default),
-                dir_paint:     Paint::with_fg_bg(Color::Cyan,   Color::Default).bold(),
-                symlink_paint: Paint::with_fg_bg(Color::Yellow, Color::Default).bold(),
-                file_paint:    Paint::with_fg_bg(Color::White,  Color::Default),
-                unknown_paint: Paint::with_fg_bg(Color::Grey,   Color::White)  .bold(),
                 preview_paint: Paint::with_fg_bg(Color::Green,  Color::Default),
+                paint_settings: PaintSettings {
+                    dir_paint:     Paint::with_fg_bg(Color::Cyan,   Color::Default).bold(),
+                    symlink_paint: Paint::with_fg_bg(Color::Yellow, Color::Default).bold(),
+                    file_paint:    Paint::with_fg_bg(Color::White,  Color::Default),
+                    unknown_paint: Paint::with_fg_bg(Color::Grey,   Color::White)  .bold(),
+                },
                 scrolling_gap: 4,
                 copy_done_notification_delay_ms: 2000,
             },
