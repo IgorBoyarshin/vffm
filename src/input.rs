@@ -9,8 +9,7 @@ pub enum Input {
     ShiftTab,
     Enter,
     Escape,
-    // Backspace,
-    // Enter,
+    Backspace,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -55,8 +54,7 @@ pub enum Command {
     NextTab,
     PreviousTab,
     ChangeCurrentName,
-    ToggleSearch,
-    EnterSearch,
+    EnterSearchMode,
 }
 
 
@@ -117,8 +115,7 @@ pub fn generate_possible_inputs() -> Matches {
     insert(Combination::ShiftTab, Command::PreviousTab);
     insert(regular("q"),          Command::CloseTab);
     insert(regular("t"),          Command::NewTab);
-    insert(regular("/"),          Command::ToggleSearch);
-    insert(Combination::Enter,    Command::EnterSearch);
+    insert(regular("/"),          Command::EnterSearchMode);
     inputs
 }
 
@@ -145,8 +142,7 @@ pub fn description_of(command: &Command) -> String {
         Command::NextTab => "Selects the next Tab (if any) as the new current tab".to_string(),
         Command::PreviousTab => "Selects the previous Tab (if any) as the new current tab".to_string(),
         Command::ChangeCurrentName => "Change the name of the current entry".to_string(),
-        Command::ToggleSearch => "Enter or leave the search field".to_string(),
-        Command::EnterSearch => "Confirm the search and return to the directory".to_string(),
+        Command::EnterSearchMode => "Go inside the search bar to edit the query".to_string(),
     }
 }
 

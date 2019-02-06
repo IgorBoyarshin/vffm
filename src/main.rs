@@ -99,9 +99,6 @@ impl Overseer {
         if let Some(Input::EventResize) = input { self.system.resize(); }
         else if let Some(input) = input {
             if self.mode == Mode::AwaitingCommand {
-                if let Input::Escape = input {
-                    log("yeeee");
-                }
                 let combination = match input {
                     Input::Tab      => Some(Combination::Tab),
                     Input::ShiftTab => Some(Combination::ShiftTab),
@@ -115,18 +112,23 @@ impl Overseer {
                 };
                 self.current_input = self.handle_combination(combination);
             } else if self.mode == Mode::Input {
-                // let combination = match input {
-                //     Input::Tab      => None,
-                //     Input::ShiftTab => None,
-                //     Input::Char(c)  => {
-                //         if !self.system.maybe_insert_input(c) {
-                //             // Then it may be a special char (command)
-                //             Some(Combination::Str(c.to_string()));
-                //         } else { None } // already inserted
-                //     },
-                //     _ => None,
-                // };
-                // self.current_input = self.handle_combination(combination);
+                match input {
+                    Input::Escape => self.system.cancel_search(),
+                    Input::Enter => self.system.confirm_search(),
+                    Input::Char(c) => self.system.insert_input(c),
+                    Input::Backspace => self.system.pop_input(),
+                    Input::Tab => self.current_input =
+                        self.handle_combination(Some(Combination::Tab)),
+                    Input::ShiftTab => self.current_input =
+                        self.handle_combination(Some(Combination::ShiftTab)),
+                    _ => {},
+                };
+            }
+            if !self.terminated { // could have been terminated already => system has no context
+                self.mode = match self.system.inside_search_bar() {
+                    true  => Mode::Input,
+                    false => Mode::AwaitingCommand,
+                };
             }
         }
     }
@@ -165,8 +167,10 @@ impl Overseer {
             Command::NextTab            => self.system.next_tab(),
             Command::PreviousTab        => self.system.previous_tab(),
             Command::ChangeCurrentName  => {},
-            Command::ToggleSearch       => self.system.toggle_search(),
-            Command::EnterSearch        => self.system.maybe_enter_search(),
+            Command::EnterSearchMode    => {
+                self.mode = Mode::Input;
+                self.system.start_search();
+            },
         }
     }
 }

@@ -62,8 +62,9 @@ struct Context {
     additional_entry_info: Option<String>,
     cumulative_size_text: Option<String>,
 
+    // inside_search_bar: bool,
     search_query: Option<String>,
-    search_cursor_index: usize,
+    search_cursor_index: Option<usize>,
 }
 //-----------------------------------------------------------------------------
 pub struct System {
@@ -174,8 +175,9 @@ impl System {
             current_siblings_shift,
             cumulative_size_text: None, // for CumulativeSize
 
+            // inside_search_bar: false,
             search_query: None,
-            search_cursor_index: 0,
+            search_cursor_index: None,
         }
     }
 
@@ -441,39 +443,54 @@ impl System {
         self.context_mut().cumulative_size_text = Some("Size: ".to_string() + &System::human_size(size));
     }
 //-----------------------------------------------------------------------------
-    pub fn toggle_search(&mut self) {
-        if self.context_ref().search_query.is_some() {
-            self.context_mut().search_query = None;
-            System::hide_cursor();
-        } else {
-            self.context_mut().search_query = Some("search me".to_string());
-            System::reveal_cursor();
-        }
+    pub fn start_search(&mut self) {
+        let text = "search me".to_string();
+        self.context_mut().search_cursor_index = Some(text.len());
+        self.context_mut().search_query = Some(text);
+        // self.context_mut().inside_search_bar = true;
+        System::reveal_cursor();
     }
 
-    pub fn maybe_enter_search(&mut self) {
-
+    pub fn cancel_search(&mut self) {
+        self.context_mut().search_query = None;
+        self.context_mut().search_cursor_index = None;
+        // self.context_mut().inside_search_bar = false;
+        System::hide_cursor();
     }
 
-    // Returns whether it was a valid input character
-    pub fn maybe_insert_input(&mut self, c: char) -> bool {
+    pub fn confirm_search(&mut self) {
+        self.context_mut().search_cursor_index = None;
+        // self.context_mut().inside_search_bar = false;
+        System::hide_cursor();
+    }
+
+    pub fn inside_search_bar(&self) -> bool {
+        self.context_ref().search_cursor_index.is_some()
+        // self.context_ref().inside_search_bar
+    }
+
+    pub fn insert_input(&mut self, c: char) {
         if System::valid_input(c) {
             if let Some(query) = self.context_mut().search_query.as_mut() {
                 // query.insert(self.context_ref().search_cursor_index, c);
                 query.push(c);
-                return true;
             }
         }
-        false
+    }
+
+    pub fn pop_input(&mut self) {
+        if let Some(query) = self.context_mut().search_query.as_mut() {
+            query.pop();
+        }
     }
 
     fn valid_input(c: char) -> bool {
-        !(c == '/')
-        // c.is_alphanumeric() || c == '_' || c == '!' || c == '@' || c == '#' || c == '$' ||
-        //     c == '%' || c == '^' || c == '&' || c == '*' || c == '(' || c == ')' || c == '-' ||
-        //     c == '=' || c == '+' || c == '.' || c == ',' || c == '?' || c == '"' || c == '\'' ||
-        //     c == '[' || c == ']' || c == '{' || c == '}' || c == '<' || c == '>' || c == '~' ||
-        //     c == '\\' || c == '|' || c == ':' || c == ';'
+        // !(c == '/')
+        c.is_alphanumeric() || c == '_' || c == '!' || c == '@' || c == '#' || c == '$' ||
+            c == '%' || c == '^' || c == '&' || c == '*' || c == '(' || c == ')' || c == '-' ||
+            c == '=' || c == '+' || c == '.' || c == ',' || c == '?' || c == '"' || c == '\'' ||
+            c == '[' || c == ']' || c == '{' || c == '}' || c == '<' || c == '>' || c == '~' ||
+            c == '\\' || c == '|' || c == ':' || c == ';' || c == '/'
     }
 //-----------------------------------------------------------------------------
     fn update_current_tab_name(&mut self) {
@@ -489,7 +506,9 @@ impl System {
     // Returns whether is was the last Tab (then perhaps whether we should terminate)
     pub fn close_tab(&mut self) -> bool {
         self.tabs.remove(self.current_tab_index);
-        if self.current_tab_index > 0 && self.current_tab_index >= self.tabs.len() {
+        if self.tabs.is_empty() {
+            self.current_tab_index = 0;
+        } else if self.current_tab_index >= self.tabs.len() {
             self.current_tab_index = self.tabs.len() - 1
         }
         self.tabs.is_empty()
@@ -1028,9 +1047,8 @@ impl System {
         let mut top_bar = Bar::with_y_and_width(0, self.display_settings.width);
         self.draw_tabs(&mut cs, &mut top_bar);
 
-        if let Some(query) = self.context_ref().search_query.as_ref() {
-            let x = 1 + query.len();
-            self.window.mv(self.display_settings.height - 1, x as Coord);
+        if let Some(index) = self.context_ref().search_cursor_index.as_ref() {
+            self.window.mv(self.display_settings.height - 1, 1 + *index as Coord);
         }
 
         self.window.refresh();
@@ -1380,10 +1398,11 @@ impl System {
         match self.window.getch() {
             Some(PInput::Character('\t'))   => Some(Input::Tab),
             Some(PInput::Character('\x1B')) => Some(Input::Escape), // \e === \x1B
+            Some(PInput::Character('\x7f')) => Some(Input::Backspace),
+            Some(PInput::Character('\x0a')) => Some(Input::Enter),
             Some(PInput::Character(c))      => Some(Input::Char(c)),
             Some(PInput::KeyBTab)           => Some(Input::ShiftTab),
             Some(PInput::KeyResize)         => Some(Input::EventResize),
-            Some(PInput::KeyEnter)          => Some(Input::Enter),
             None                            => None,
             _                               => Some(Input::Unknown),
         }
