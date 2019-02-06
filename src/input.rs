@@ -24,7 +24,6 @@ pub enum Combination {
     Str(String),
     Tab,
     ShiftTab,
-    Enter,
 }
 
 fn regular(chars: &str) -> Combination {
@@ -53,7 +52,7 @@ pub enum Command {
     CloseTab,
     NextTab,
     PreviousTab,
-    ChangeCurrentName,
+    // ChangeCurrentName,
     EnterSearchMode,
 }
 
@@ -141,7 +140,7 @@ pub fn description_of(command: &Command) -> String {
         Command::CloseTab => "Closes current Tab. If it is the last tab then closes the program".to_string(),
         Command::NextTab => "Selects the next Tab (if any) as the new current tab".to_string(),
         Command::PreviousTab => "Selects the previous Tab (if any) as the new current tab".to_string(),
-        Command::ChangeCurrentName => "Change the name of the current entry".to_string(),
+        // Command::ChangeCurrentName => "Change the name of the current entry".to_string(),
         Command::EnterSearchMode => "Go inside the search bar to edit the query".to_string(),
     }
 }

@@ -1,3 +1,5 @@
+#![feature(drain_filter)]
+
 // use std::{thread, time};
 
 extern crate pancurses;
@@ -166,7 +168,7 @@ impl Overseer {
             Command::CloseTab           => self.terminated = self.system.close_tab(),
             Command::NextTab            => self.system.next_tab(),
             Command::PreviousTab        => self.system.previous_tab(),
-            Command::ChangeCurrentName  => {},
+            // Command::ChangeCurrentName  => {},
             Command::EnterSearchMode    => {
                 self.mode = Mode::Input;
                 self.system.start_search();

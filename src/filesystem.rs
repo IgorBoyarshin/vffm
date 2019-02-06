@@ -128,17 +128,17 @@ pub struct Entry {
     pub permissions: Permissions,
 }
 
-impl Entry {
-    pub fn is_symlink(&self) -> bool {
-        self.entrytype == EntryType::Symlink
-    }
+// impl Entry {
+    // pub fn is_symlink(&self) -> bool {
+    //     self.entrytype == EntryType::Symlink
+    // }
     // pub fn is_regular(&self) -> bool {
     //     self.entrytype == EntryType::Regular
     // }
-    pub fn is_dir(&self) -> bool {
-        self.entrytype == EntryType::Directory
-    }
-}
+    // pub fn is_dir(&self) -> bool {
+    //     self.entrytype == EntryType::Directory
+    // }
+// }
 
 pub fn read_lines(path: &PathBuf, amount: usize, max_bytes: u64) -> Vec<String> {
     let file = File::open(path);

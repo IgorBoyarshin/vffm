@@ -45,7 +45,7 @@ struct DisplaySettings {
 #[derive(Clone)]
 struct Context {
     current_siblings: Vec<DirEntry>,
-    reduced_current_siblings: Vec<Entry>,
+    current_siblings_backup: Vec<DirEntry>,
     parent_siblings: Vec<DirEntry>,
     right_column: RightColumn, // depends on display_settings
 
@@ -166,7 +166,7 @@ impl System {
             current_permissions: System::string_permissions_for_entry(&first_entry_ref),
             additional_entry_info: System::get_additional_entry_info(first_entry_ref, &first_entry_path),
             current_siblings,
-            reduced_current_siblings: Vec::new(),
+            current_siblings_backup: Vec::new(),
             right_column,
             current_path: first_entry_path,
             parent_path,
@@ -443,54 +443,93 @@ impl System {
         self.context_mut().cumulative_size_text = Some("Size: ".to_string() + &System::human_size(size));
     }
 //-----------------------------------------------------------------------------
+    fn collect_entries_that_match(orig: &Vec<DirEntry>, pattern: &str) -> Vec<DirEntry> {
+        orig.clone().into_iter().filter(|entry|
+            System::contains_pattern(&entry.name, &pattern)).collect()
+    }
+
+    // fn queried_siblings
     pub fn start_search(&mut self) {
-        let text = "search me".to_string();
-        self.context_mut().search_cursor_index = Some(text.len());
-        self.context_mut().search_query = Some(text);
-        // self.context_mut().inside_search_bar = true;
+        if let Some(query) = self.context_ref().search_query.as_ref() {
+            let query = query.clone();
+            self.context_mut().search_cursor_index = Some(query.len());
+
+            // Already have backup
+            // No changes to the query here => nothing to update
+        } else {
+            self.context_mut().search_query = Some("".to_string());
+            self.context_mut().search_cursor_index = Some(0);
+
+            // Make backup
+            self.context_mut().current_siblings_backup =
+                self.context_ref().current_siblings.clone();
+
+            // All entires match empty query
+        }
         System::reveal_cursor();
     }
 
     pub fn cancel_search(&mut self) {
         self.context_mut().search_query = None;
         self.context_mut().search_cursor_index = None;
-        // self.context_mut().inside_search_bar = false;
         System::hide_cursor();
+
+        self.context_mut().current_siblings =
+            self.context_mut().current_siblings_backup.drain(..).collect();
+        self.update_current_without_siblings();
     }
 
     pub fn confirm_search(&mut self) {
         self.context_mut().search_cursor_index = None;
-        // self.context_mut().inside_search_bar = false;
         System::hide_cursor();
     }
 
     pub fn inside_search_bar(&self) -> bool {
         self.context_ref().search_cursor_index.is_some()
-        // self.context_ref().inside_search_bar
     }
 
+    // !!! The fact that new chars are inserted at the end is used as an optimization while searching
     pub fn insert_input(&mut self, c: char) {
         if System::valid_input(c) {
             if let Some(query) = self.context_mut().search_query.as_mut() {
-                // query.insert(self.context_ref().search_cursor_index, c);
                 query.push(c);
+                let pattern = query.clone();
+                self.context_mut().search_cursor_index.as_mut().map(|index| *index += 1);
+                // Optimization: search only among the last known matches because the new ones
+                // must be a subset of them due to appending chars to the end of query
+                self.context_mut().current_siblings.retain(|entry|
+                    System::contains_pattern(&entry.name, &pattern));
+                self.update_current_without_siblings();
             }
         }
     }
 
     pub fn pop_input(&mut self) {
         if let Some(query) = self.context_mut().search_query.as_mut() {
-            query.pop();
+            if query.len() > 0 {
+                query.pop();
+                let pattern = query.clone();
+                self.context_mut().search_cursor_index.as_mut().map(|index| *index -= 1);
+                self.context_mut().current_siblings = System::collect_entries_that_match(
+                    &self.context_ref().current_siblings_backup, &pattern);
+                self.update_current_without_siblings();
+            }
         }
     }
 
+    fn contains_pattern(string: &str, pattern: &str) -> bool {
+        let pattern_lowercase = pattern.to_lowercase();
+        let case_sensitive = pattern_lowercase != pattern;
+        if case_sensitive { string               .contains( pattern          ) }
+        else              { string.to_lowercase().contains(&pattern_lowercase) }
+    }
+
     fn valid_input(c: char) -> bool {
-        // !(c == '/')
         c.is_alphanumeric() || c == '_' || c == '!' || c == '@' || c == '#' || c == '$' ||
             c == '%' || c == '^' || c == '&' || c == '*' || c == '(' || c == ')' || c == '-' ||
             c == '=' || c == '+' || c == '.' || c == ',' || c == '?' || c == '"' || c == '\'' ||
             c == '[' || c == ']' || c == '{' || c == '}' || c == '<' || c == '>' || c == '~' ||
-            c == '\\' || c == '|' || c == ':' || c == ';' || c == '/'
+            c == '\\' || c == '|' || c == ':' || c == ';' || c == '/' || c == ' '
     }
 //-----------------------------------------------------------------------------
     fn update_current_tab_name(&mut self) {
@@ -662,6 +701,10 @@ impl System {
     // Update central column and right column
     pub fn update_current(&mut self) {
         self.context_mut().current_siblings = self.collect_sorted_children_of_parent();
+        self.update_current_without_siblings();
+    }
+
+    pub fn update_current_without_siblings(&mut self) {
         let len = self.context_ref().current_siblings.len();
         self.context_mut().current_index =
             if self.context_ref().current_siblings.is_empty() { 0 } // reset for future
@@ -673,6 +716,12 @@ impl System {
         self.context_mut().right_column = self.collect_right_column_of_current();
         self.context_mut().current_permissions = self.get_current_permissions();
         self.context_mut().current_siblings_shift = self.recalculate_current_siblings_shift();
+        self.context_mut().additional_entry_info = self.get_additional_entry_info_for_current();
+        if let Some(path) = self.context_ref().current_path.as_ref() {
+            if let Some(new_size) = maybe_size(path) {
+                self.unsafe_current_entry_mut().size = new_size;
+            }
+        }
     }
 
     fn update_transfer_progress(&mut self) {
@@ -819,8 +868,10 @@ impl System {
         self.context_mut().right_column = self.collect_right_column_of_current();
         self.context_mut().current_siblings_shift = self.recalculate_current_siblings_shift();
         self.context_mut().additional_entry_info = self.get_additional_entry_info_for_current();
-        if let Some(new_size) = maybe_size(self.context_ref().current_path.as_ref().unwrap()) {
-            self.unsafe_current_entry_mut().size = new_size;
+        if let Some(path) = self.context_ref().current_path.as_ref() {
+            if let Some(new_size) = maybe_size(path) {
+                self.unsafe_current_entry_mut().size = new_size;
+            }
         }
     }
 
