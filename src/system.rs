@@ -15,6 +15,13 @@ use crate::input::*;
 
 
 //-----------------------------------------------------------------------------
+#[derive(Clone)]
+struct SearchTools {
+    query: String,
+    cursor_index: Option<usize>, // None if not if focus
+    current_siblings_backup: Vec<DirEntry>,
+}
+
 pub struct Settings {
     pub paint_settings: PaintSettings,
     pub primary_paint: Paint,
@@ -45,7 +52,6 @@ struct DisplaySettings {
 #[derive(Clone)]
 struct Context {
     current_siblings: Vec<DirEntry>,
-    current_siblings_backup: Vec<DirEntry>,
     parent_siblings: Vec<DirEntry>,
     right_column: RightColumn, // depends on display_settings
 
@@ -62,9 +68,7 @@ struct Context {
     additional_entry_info: Option<String>,
     cumulative_size_text: Option<String>,
 
-    // inside_search_bar: bool,
-    search_query: Option<String>,
-    search_cursor_index: Option<usize>,
+    search_tools: Option<SearchTools>,
 }
 //-----------------------------------------------------------------------------
 pub struct System {
@@ -166,7 +170,6 @@ impl System {
             current_permissions: System::string_permissions_for_entry(&first_entry_ref),
             additional_entry_info: System::get_additional_entry_info(first_entry_ref, &first_entry_path),
             current_siblings,
-            current_siblings_backup: Vec::new(),
             right_column,
             current_path: first_entry_path,
             parent_path,
@@ -175,9 +178,7 @@ impl System {
             current_siblings_shift,
             cumulative_size_text: None, // for CumulativeSize
 
-            // inside_search_bar: false,
-            search_query: None,
-            search_cursor_index: None,
+            search_tools: None,
         }
     }
 
@@ -444,59 +445,68 @@ impl System {
     }
 //-----------------------------------------------------------------------------
     fn collect_entries_that_match(orig: &Vec<DirEntry>, pattern: &str) -> Vec<DirEntry> {
-        orig.clone().into_iter().filter(|entry|
-            System::contains_pattern(&entry.name, &pattern)).collect()
+        orig.iter().filter(|e| System::contains_pattern(&e.name, &pattern)).map(|e| e.clone()).collect()
     }
 
     // fn queried_siblings
     pub fn start_search(&mut self) {
-        if let Some(query) = self.context_ref().search_query.as_ref() {
-            let query = query.clone();
-            self.context_mut().search_cursor_index = Some(query.len());
-
-            // Already have backup
-            // No changes to the query here => nothing to update
+        if let Some(search_tools) = self.context_mut().search_tools.as_mut() {
+            search_tools.cursor_index = Some(search_tools.query.len());
         } else {
-            self.context_mut().search_query = Some("".to_string());
-            self.context_mut().search_cursor_index = Some(0);
-
-            // Make backup
-            self.context_mut().current_siblings_backup =
-                self.context_ref().current_siblings.clone();
-
-            // All entires match empty query
+            self.context_mut().search_tools = Some(SearchTools {
+                query: "".to_string(),
+                cursor_index: Some(0),
+                current_siblings_backup: self.context_ref().current_siblings.clone(),
+            });
         }
         System::reveal_cursor();
     }
 
-    pub fn cancel_search(&mut self) {
-        self.context_mut().search_query = None;
-        self.context_mut().search_cursor_index = None;
+    fn reset_search_tools(&mut self) {
+        self.context_mut().search_tools = None;
+        // self.context_mut().search_query = None;
+        // self.context_mut().search_cursor_index = None;
+        // // The following line isn't necessary. The backup is either drained or lies dormant until
+        // // it is reinitialized inside start_search. So there is no harm keeping it aside from
+        // // storing it in memory. But just to be safe, let's clear it here anyway:
+        // self.context_mut().current_siblings_backup = Vec::new();
         System::hide_cursor();
+    }
 
+    fn reset_search_tools_and_restore_siblings(&mut self) {
         self.context_mut().current_siblings =
-            self.context_mut().current_siblings_backup.drain(..).collect();
+            self.context_mut().search_tools.as_mut().unwrap()
+            .current_siblings_backup.drain(..)
+            .collect();
+        self.reset_search_tools();
+    }
+
+    pub fn cancel_search(&mut self) {
+        self.reset_search_tools_and_restore_siblings();
         self.update_current_without_siblings();
     }
 
     pub fn confirm_search(&mut self) {
-        self.context_mut().search_cursor_index = None;
+        self.context_mut().search_tools.as_mut().unwrap().cursor_index = None;
         System::hide_cursor();
     }
 
     pub fn inside_search_bar(&self) -> bool {
-        self.context_ref().search_cursor_index.is_some()
+        if let Some(SearchTools {cursor_index, ..}) = self.context_ref().search_tools.as_ref() {
+            return cursor_index.is_some();
+        } else { false }
     }
 
-    // !!! The fact that new chars are inserted at the end is used as an optimization while searching
+    // !!! The fact that new chars are inserted at the end is used as an optimization while
+    // performing an insertion step
     pub fn insert_input(&mut self, c: char) {
         if System::valid_input(c) {
-            if let Some(query) = self.context_mut().search_query.as_mut() {
-                query.push(c);
-                let pattern = query.clone();
-                self.context_mut().search_cursor_index.as_mut().map(|index| *index += 1);
+            if let Some(search_tools) = self.context_mut().search_tools.as_mut() {
+                search_tools.query.push(c);
+                search_tools.cursor_index.as_mut().map(|index| *index += 1);
                 // Optimization: search only among the last known matches because the new ones
                 // must be a subset of them due to appending chars to the end of query
+                let pattern = search_tools.query.clone();
                 self.context_mut().current_siblings.retain(|entry|
                     System::contains_pattern(&entry.name, &pattern));
                 self.update_current_without_siblings();
@@ -505,13 +515,13 @@ impl System {
     }
 
     pub fn pop_input(&mut self) {
-        if let Some(query) = self.context_mut().search_query.as_mut() {
+        if let Some(SearchTools {query, cursor_index, current_siblings_backup}) = self.context_mut().search_tools.as_mut() {
             if query.len() > 0 {
                 query.pop();
                 let pattern = query.clone();
-                self.context_mut().search_cursor_index.as_mut().map(|index| *index -= 1);
+                cursor_index.as_mut().map(|index| *index -= 1);
                 self.context_mut().current_siblings = System::collect_entries_that_match(
-                    &self.context_ref().current_siblings_backup, &pattern);
+                    &current_siblings_backup, &pattern);
                 self.update_current_without_siblings();
             }
         }
@@ -554,7 +564,10 @@ impl System {
     }
 
     pub fn new_tab(&mut self) {
+        // The trick here is that we create a copy of the current tab and refer
+        // to the copy as to the old tab, and start reigning in the new one
         self.tabs.push(self.current_tab_ref().clone());
+        self.reset_search_tools_and_restore_siblings();
     }
 
     pub fn next_tab(&mut self) {
@@ -889,6 +902,7 @@ impl System {
         self.context_mut().parent_siblings = self.collect_sorted_siblings_of_parent();
         self.context_mut().additional_entry_info = self.get_additional_entry_info_for_current();
         self.context_mut().current_permissions = self.get_current_permissions();
+        self.reset_search_tools();
         self.update_current_tab_name();
     }
 //-----------------------------------------------------------------------------
@@ -1008,7 +1022,7 @@ impl System {
                             &entry, under_cursor, entry.is_selected);
         }
     }
-
+//-----------------------------------------------------------------------------
     fn maybe_index_of_selected(path: &PathBuf, selected: &Vec<PathBuf>) -> Option<usize> {
         selected.iter().enumerate()
             .find(|(_, item)| *item == path)
@@ -1084,9 +1098,7 @@ impl System {
 
         let mut bottom_bar = Bar::with_y_and_width(
             self.display_settings.height - 1, self.display_settings.width);
-        if self.context_ref().search_query.is_some() {
-            self.draw_search_bar(&mut cs, &mut bottom_bar);
-        }
+        self.maybe_draw_search_bar(&mut cs, &mut bottom_bar);
         self.draw_current_permission(&mut cs, &mut bottom_bar);
         self.draw_current_size(&mut cs, &mut bottom_bar);
         self.maybe_draw_additional_info_for_current(&mut cs, &mut bottom_bar);
@@ -1098,8 +1110,11 @@ impl System {
         let mut top_bar = Bar::with_y_and_width(0, self.display_settings.width);
         self.draw_tabs(&mut cs, &mut top_bar);
 
-        if let Some(index) = self.context_ref().search_cursor_index.as_ref() {
-            self.window.mv(self.display_settings.height - 1, 1 + *index as Coord);
+        // Put visible cursor after the search bar query, so that the user sees where he types
+        if let Some(SearchTools {cursor_index, ..}) = self.context_ref().search_tools.as_ref() {
+            if let Some(index) = cursor_index {
+                self.window.mv(self.display_settings.height - 1, 1 + *index as Coord);
+            }
         }
 
         self.window.refresh();
@@ -1179,8 +1194,8 @@ impl System {
         }
     }
 
-    fn draw_search_bar(&self, cs: &mut ColorSystem, bar: &mut Bar) {
-        if let Some(query) = self.context_ref().search_query.as_ref() {
+    fn maybe_draw_search_bar(&self, cs: &mut ColorSystem, bar: &mut Bar) {
+        if let Some(SearchTools {query, ..}) = self.context_ref().search_tools.as_ref() {
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
             let text = "/".to_string() + query;
             bar.draw_left(&self.window, &text, 2);
