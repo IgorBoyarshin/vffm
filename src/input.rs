@@ -7,6 +7,8 @@ pub enum Input {
     Char(char),
     Tab,
     ShiftTab,
+    Enter,
+    Escape,
     // Backspace,
     // Enter,
 }
@@ -23,6 +25,7 @@ pub enum Combination {
     Str(String),
     Tab,
     ShiftTab,
+    Enter,
 }
 
 fn regular(chars: &str) -> Combination {
@@ -51,6 +54,9 @@ pub enum Command {
     CloseTab,
     NextTab,
     PreviousTab,
+    ChangeCurrentName,
+    ToggleSearch,
+    EnterSearch,
 }
 
 
@@ -76,9 +82,13 @@ pub fn generate_possible_inputs() -> Matches {
         }
     };
     insert(regular("h"),  Command::Left);
+    // insert(regular("р"),  Command::Left);
     insert(regular("j"),  Command::Down(1));
+    // insert(regular("о"),  Command::Down(1));
     insert(regular("k"),  Command::Up(1));
+    // insert(regular("л"),  Command::Up(1));
     insert(regular("l"),  Command::Right);
+    // insert(regular("д"),  Command::Right);
     insert(regular("K"),  Command::Up(5));
     insert(regular("J"),  Command::Down(5));
     insert(regular("sl"), Command::Sort(SortingType::Lexicographically));
@@ -107,13 +117,15 @@ pub fn generate_possible_inputs() -> Matches {
     insert(Combination::ShiftTab, Command::PreviousTab);
     insert(regular("q"),          Command::CloseTab);
     insert(regular("t"),          Command::NewTab);
+    insert(regular("/"),          Command::ToggleSearch);
+    insert(Combination::Enter,    Command::EnterSearch);
     inputs
 }
 
 pub fn description_of(command: &Command) -> String {
     match command {
         // Command::Terminate => "Close the program".to_string(),
-        Command::GoTo(path) => "Go to ".to_string() + path,
+        Command::GoTo(path) => format!("Go to {}", path),
         Command::Up(n) => format!("Navigate up one entry in the list {} times", n),
         Command::Down(n) => format!("Navigate down one entry in the list {} times", n),
         Command::Left => "Navigate to the parent directory".to_string(),
@@ -132,12 +144,11 @@ pub fn description_of(command: &Command) -> String {
         Command::CloseTab => "Closes current Tab. If it is the last tab then closes the program".to_string(),
         Command::NextTab => "Selects the next Tab (if any) as the new current tab".to_string(),
         Command::PreviousTab => "Selects the previous Tab (if any) as the new current tab".to_string(),
+        Command::ChangeCurrentName => "Change the name of the current entry".to_string(),
+        Command::ToggleSearch => "Enter or leave the search field".to_string(),
+        Command::EnterSearch => "Confirm the search and return to the directory".to_string(),
     }
 }
-
-// pub fn matches_that_start_with<'a>(slice: &Combination, matches: &'a Matches) -> Option<&'a Vec<Match>> {
-//     matches.get(slice)
-// }
 
 pub fn exact_match(matches: &Vec<Match>, input: &Combination) -> bool {
     (matches.len() == 1) && (matches[0].0 == *input)

@@ -99,6 +99,9 @@ impl Overseer {
         if let Some(Input::EventResize) = input { self.system.resize(); }
         else if let Some(input) = input {
             if self.mode == Mode::AwaitingCommand {
+                if let Input::Escape = input {
+                    log("yeeee");
+                }
                 let combination = match input {
                     Input::Tab      => Some(Combination::Tab),
                     Input::ShiftTab => Some(Combination::ShiftTab),
@@ -110,9 +113,21 @@ impl Overseer {
                     },
                     _ => None,
                 };
-
                 self.current_input = self.handle_combination(combination);
-            } else if self.mode == Mode::Input {}
+            } else if self.mode == Mode::Input {
+                // let combination = match input {
+                //     Input::Tab      => None,
+                //     Input::ShiftTab => None,
+                //     Input::Char(c)  => {
+                //         if !self.system.maybe_insert_input(c) {
+                //             // Then it may be a special char (command)
+                //             Some(Combination::Str(c.to_string()));
+                //         } else { None } // already inserted
+                //     },
+                //     _ => None,
+                // };
+                // self.current_input = self.handle_combination(combination);
+            }
         }
     }
 
@@ -122,38 +137,37 @@ impl Overseer {
             if let Some(matches) = self.possible_inputs.get(&combination) {
                 if !exact_match(matches, &combination) { return Some(combination); }
                 let (_, command) = matches[0];
-                let terminate = Overseer::handle_command(&mut self.system, &command);
-                if terminate { self.terminated = true; }
+                self.handle_command(&command);
             }
         }
         None
     }
 
-    fn handle_command(system: &mut System, command: &Command) -> bool {
-        let mut terminate = false;
+    fn handle_command(&mut self, command: &Command) {
         match command {
-            // Command::Terminate          => terminate = true,
-            Command::Up(n)              => for _ in 0..*n {system.up()},
-            Command::Down(n)            => for _ in 0..*n {system.down()},
-            Command::Left               => system.left(),
-            Command::Right              => system.right(),
-            Command::Sort(sorting_type) => system.sort_with(*sorting_type),
-            Command::GoTo(path)         => system.goto(path),
-            Command::Remove             => system.remove_selected(),
-            Command::Update             => system.update_current(),
-            Command::Yank               => system.yank_selected(),
-            Command::Cut                => system.cut_selected(),
-            Command::Paste              => system.paste_into_current(),
-            Command::CumulativeSize     => system.get_cumulative_size(),
-            Command::SelectUnderCursor  => system.select_under_cursor(),
-            Command::InvertSelection    => system.invert_selection(),
-            Command::ClearSelection     => system.clear_selection(),
-            Command::NewTab             => system.new_tab(),
-            Command::CloseTab           => terminate = system.close_tab(),
-            Command::NextTab            => system.next_tab(),
-            Command::PreviousTab        => system.previous_tab(),
+            Command::Up(n)              => for _ in 0..*n {self.system.up()},
+            Command::Down(n)            => for _ in 0..*n {self.system.down()},
+            Command::Left               => self.system.left(),
+            Command::Right              => self.system.right(),
+            Command::Sort(sorting_type) => self.system.sort_with(*sorting_type),
+            Command::GoTo(path)         => self.system.goto(path),
+            Command::Remove             => self.system.remove_selected(),
+            Command::Update             => self.system.update_current(),
+            Command::Yank               => self.system.yank_selected(),
+            Command::Cut                => self.system.cut_selected(),
+            Command::Paste              => self.system.paste_into_current(),
+            Command::CumulativeSize     => self.system.get_cumulative_size(),
+            Command::SelectUnderCursor  => self.system.select_under_cursor(),
+            Command::InvertSelection    => self.system.invert_selection(),
+            Command::ClearSelection     => self.system.clear_selection(),
+            Command::NewTab             => self.system.new_tab(),
+            Command::CloseTab           => self.terminated = self.system.close_tab(),
+            Command::NextTab            => self.system.next_tab(),
+            Command::PreviousTab        => self.system.previous_tab(),
+            Command::ChangeCurrentName  => {},
+            Command::ToggleSearch       => self.system.toggle_search(),
+            Command::EnterSearch        => self.system.maybe_enter_search(),
         }
-        terminate
     }
 }
 

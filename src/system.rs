@@ -1,4 +1,4 @@
-use pancurses::{Window, initscr, start_color, use_default_colors, noecho, half_delay, endwin, curs_set,
+use pancurses::{Window, initscr, start_color, use_default_colors, noecho, half_delay, endwin, curs_set, nocbreak,
     ACS_CKBOARD, ACS_VLINE, ACS_HLINE, ACS_TTEE, ACS_BTEE,
     ACS_LLCORNER, ACS_LRCORNER, ACS_ULCORNER, ACS_URCORNER};
 use std::path::PathBuf;
@@ -7,96 +7,12 @@ use std::collections::HashMap;
 use std::ops::RangeBounds;
 use std::ffi::OsStr;
 use std::process::Child;
-// use std::io::Read;
 use std::time::SystemTime;
 
 use crate::coloring::*;
 use crate::filesystem::*;
 use crate::input::*;
 
-
-pub struct PaintSettings {
-    pub dir_paint: Paint,
-    pub symlink_paint: Paint,
-    pub file_paint: Paint,
-    pub unknown_paint: Paint,
-}
-
-#[derive(Clone)]
-struct DirEntry {
-    entrytype: EntryType,
-    name: String,
-    size: u64,
-    time_modified: u64,
-    permissions: Permissions,
-
-    paint: Paint,
-    is_selected: bool,
-}
-
-impl DirEntry {
-    fn is_partially_executable(entry: &Entry) -> bool {
-        (entry.permissions.world % 2 == 1) ||
-        (entry.permissions.group % 2 == 1) ||
-        (entry.permissions.owner % 2 == 1)
-    }
-
-    fn from_entry(entry: Entry, paint_settings: &PaintSettings, is_selected: bool) -> DirEntry {
-        let executable = DirEntry::is_partially_executable(&entry);
-        let paint = paint_for(&entry.entrytype, &entry.name, executable, paint_settings);
-        DirEntry {
-            entrytype: entry.entrytype,
-            name: entry.name,
-            size: entry.size,
-            time_modified: entry.time_modified,
-            permissions: entry.permissions,
-            paint,
-            is_selected,
-        }
-    }
-
-    fn is_symlink(&self) -> bool {
-        self.entrytype == EntryType::Symlink
-    }
-    // fn is_regular(&self) -> bool {
-    //     self.entrytype == EntryType::Regular
-    // }
-    fn is_dir(&self) -> bool {
-        self.entrytype == EntryType::Directory
-    }
-}
-
-fn paint_for(entrytype: &EntryType, name: &str,
-        executable: bool, paint_settings: &PaintSettings) -> Paint {
-    match entrytype {
-        EntryType::Directory => paint_settings.dir_paint,
-        EntryType::Symlink   => paint_settings.symlink_paint,
-        EntryType::Unknown   => paint_settings.unknown_paint,
-        EntryType::Regular   =>
-            if let Some(paint) = maybe_paint_by_name(name) { paint }
-            else if executable { Paint::with_fg_bg(Color::Green, Color::Default).bold() }
-            else { paint_settings.file_paint },
-    }
-}
-
-fn maybe_paint_by_name(name: &str) -> Option<Paint> {
-    if      name.ends_with(".cpp")  { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
-    else if name.ends_with(".java") { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
-    else if name.ends_with(".rs")   { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
-    else if name.ends_with(".h")    { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
-    else if name.ends_with(".pdf")  { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
-    else if name.ends_with(".djvu") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
-    else if name.ends_with(".mp3")  { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)       ) }
-    else if name.ends_with(".webm") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)       ) }
-    else if name.ends_with(".png")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
-    else if name.ends_with(".gif")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
-    else if name.ends_with(".jpg")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
-    else if name.ends_with(".jpeg") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
-    else if name.ends_with(".mkv")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
-    else if name.ends_with(".avi")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
-    else if name.ends_with(".mp4")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
-    None
-}
 
 //-----------------------------------------------------------------------------
 pub struct Settings {
@@ -107,6 +23,13 @@ pub struct Settings {
     pub columns_ratio: Vec<u32>,
     pub scrolling_gap: usize,
     pub copy_done_notification_delay_ms: Millis,
+}
+
+pub struct PaintSettings {
+    pub dir_paint: Paint,
+    pub symlink_paint: Paint,
+    pub file_paint: Paint,
+    pub unknown_paint: Paint,
 }
 
 struct DisplaySettings {
@@ -122,6 +45,7 @@ struct DisplaySettings {
 #[derive(Clone)]
 struct Context {
     current_siblings: Vec<DirEntry>,
+    reduced_current_siblings: Vec<Entry>,
     parent_siblings: Vec<DirEntry>,
     right_column: RightColumn, // depends on display_settings
 
@@ -137,6 +61,9 @@ struct Context {
     current_permissions: String,
     additional_entry_info: Option<String>,
     cumulative_size_text: Option<String>,
+
+    search_query: Option<String>,
+    search_cursor_index: usize,
 }
 //-----------------------------------------------------------------------------
 pub struct System {
@@ -238,6 +165,7 @@ impl System {
             current_permissions: System::string_permissions_for_entry(&first_entry_ref),
             additional_entry_info: System::get_additional_entry_info(first_entry_ref, &first_entry_path),
             current_siblings,
+            reduced_current_siblings: Vec::new(),
             right_column,
             current_path: first_entry_path,
             parent_path,
@@ -245,6 +173,9 @@ impl System {
             parent_siblings_shift,
             current_siblings_shift,
             cumulative_size_text: None, // for CumulativeSize
+
+            search_query: None,
+            search_cursor_index: 0,
         }
     }
 
@@ -505,6 +436,41 @@ impl System {
         if self.inside_empty_dir() { return }
         let size = cumulative_size(self.context_ref().current_path.as_ref().unwrap());
         self.context_mut().cumulative_size_text = Some("Size: ".to_string() + &System::human_size(size));
+    }
+//-----------------------------------------------------------------------------
+    pub fn toggle_search(&mut self) {
+        if self.context_ref().search_query.is_some() {
+            self.context_mut().search_query = None;
+            System::hide_cursor();
+        } else {
+            self.context_mut().search_query = Some("search me".to_string());
+            System::reveal_cursor();
+        }
+    }
+
+    pub fn maybe_enter_search(&mut self) {
+
+    }
+
+    // Returns whether it was a valid input character
+    pub fn maybe_insert_input(&mut self, c: char) -> bool {
+        if System::valid_input(c) {
+            if let Some(query) = self.context_mut().search_query.as_mut() {
+                // query.insert(self.context_ref().search_cursor_index, c);
+                query.push(c);
+                return true;
+            }
+        }
+        false
+    }
+
+    fn valid_input(c: char) -> bool {
+        !(c == '/')
+        // c.is_alphanumeric() || c == '_' || c == '!' || c == '@' || c == '#' || c == '$' ||
+        //     c == '%' || c == '^' || c == '&' || c == '*' || c == '(' || c == ')' || c == '-' ||
+        //     c == '=' || c == '+' || c == '.' || c == ',' || c == '?' || c == '"' || c == '\'' ||
+        //     c == '[' || c == ']' || c == '{' || c == '}' || c == '<' || c == '>' || c == '~' ||
+        //     c == '\\' || c == '|' || c == ':' || c == ';'
     }
 //-----------------------------------------------------------------------------
     fn update_current_tab_name(&mut self) {
@@ -931,6 +897,8 @@ impl System {
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::Red, Color::Default));
             self.window.mvaddch(y, begin + 1, ACS_CKBOARD());
             self.window.mvaddch(y, begin + 2, ' ');
+            // cs.set_paint(&self.window, Paint::with_fg_bg(Color::Yellow, Color::Default));
+            // self.window.mvaddch(y, begin + 2, ACS_CKBOARD());
             begin += 2;
         }
         let column_width = end - begin;
@@ -1043,6 +1011,9 @@ impl System {
 
         let mut bottom_bar = Bar::with_y_and_width(
             self.display_settings.height - 1, self.display_settings.width);
+        if self.context_ref().search_query.is_some() {
+            self.draw_search_bar(&mut cs, &mut bottom_bar);
+        }
         self.draw_current_permission(&mut cs, &mut bottom_bar);
         self.draw_current_size(&mut cs, &mut bottom_bar);
         self.maybe_draw_additional_info_for_current(&mut cs, &mut bottom_bar);
@@ -1053,6 +1024,11 @@ impl System {
 
         let mut top_bar = Bar::with_y_and_width(0, self.display_settings.width);
         self.draw_tabs(&mut cs, &mut top_bar);
+
+        if let Some(query) = self.context_ref().search_query.as_ref() {
+            let x = 1 + query.len();
+            self.window.mv(self.display_settings.height - 1, x as Coord);
+        }
 
         self.window.refresh();
     }
@@ -1128,6 +1104,14 @@ impl System {
             let path = self.context_ref().current_path.as_ref().unwrap().to_str().unwrap();
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
             mvprintw(&self.window, 0, 0, path);
+        }
+    }
+
+    fn draw_search_bar(&self, cs: &mut ColorSystem, bar: &mut Bar) {
+        if let Some(query) = self.context_ref().search_query.as_ref() {
+            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
+            let text = "/".to_string() + query;
+            bar.draw_left(&self.window, &text, 2);
         }
     }
 
@@ -1365,9 +1349,19 @@ impl System {
         start_color();
         use_default_colors();
         noecho();
-        curs_set(0); // Make cursor invisible
+        System::hide_cursor();
+        nocbreak();
+        window.timeout(0);
 
         window
+    }
+
+    fn hide_cursor() {
+        curs_set(0);
+    }
+
+    fn reveal_cursor() {
+        curs_set(1);
     }
 
     fn set_drawing_delay(drawing_delay: DrawingDelay) {
@@ -1381,14 +1375,14 @@ impl System {
     pub fn get(&self) -> Option<Input> {
         use pancurses::Input as PInput;
         match self.window.getch() {
-            Some(PInput::Character('\t')) => Some(Input::Tab),
-            Some(PInput::Character(c))    => Some(Input::Char(c)),
-            Some(PInput::KeyBTab)         => Some(Input::ShiftTab),
-            Some(PInput::KeyResize)       => Some(Input::EventResize),
-            // Some(PInput::KeyBackspace)    => Some(Input::Backspace),
-            // Some(PInput::KeyEnter)        => Some(Input::Enter),
-            None                          => None,
-            _                             => Some(Input::Unknown),
+            Some(PInput::Character('\t'))   => Some(Input::Tab),
+            Some(PInput::Character('\x1B')) => Some(Input::Escape), // \e === \x1B
+            Some(PInput::Character(c))      => Some(Input::Char(c)),
+            Some(PInput::KeyBTab)           => Some(Input::ShiftTab),
+            Some(PInput::KeyResize)         => Some(Input::EventResize),
+            Some(PInput::KeyEnter)          => Some(Input::Enter),
+            None                            => None,
+            _                               => Some(Input::Unknown),
         }
     }
 
@@ -1646,6 +1640,82 @@ impl Notification {
     fn has_finished(&self) -> bool {
         millis_since(self.start_time) > self.show_time_millis
     }
+}
+//-----------------------------------------------------------------------------
+#[derive(Clone)]
+struct DirEntry {
+    entrytype: EntryType,
+    name: String,
+    size: u64,
+    time_modified: u64,
+    permissions: Permissions,
+
+    paint: Paint,
+    is_selected: bool,
+}
+
+impl DirEntry {
+    fn is_partially_executable(entry: &Entry) -> bool {
+        (entry.permissions.world % 2 == 1) ||
+        (entry.permissions.group % 2 == 1) ||
+        (entry.permissions.owner % 2 == 1)
+    }
+
+    fn from_entry(entry: Entry, paint_settings: &PaintSettings, is_selected: bool) -> DirEntry {
+        let executable = DirEntry::is_partially_executable(&entry);
+        let paint = paint_for(&entry.entrytype, &entry.name, executable, paint_settings);
+        DirEntry {
+            entrytype: entry.entrytype,
+            name: entry.name,
+            size: entry.size,
+            time_modified: entry.time_modified,
+            permissions: entry.permissions,
+            paint,
+            is_selected,
+        }
+    }
+
+    fn is_symlink(&self) -> bool {
+        self.entrytype == EntryType::Symlink
+    }
+    // fn is_regular(&self) -> bool {
+    //     self.entrytype == EntryType::Regular
+    // }
+    fn is_dir(&self) -> bool {
+        self.entrytype == EntryType::Directory
+    }
+}
+
+fn paint_for(entrytype: &EntryType, name: &str,
+        executable: bool, paint_settings: &PaintSettings) -> Paint {
+    match entrytype {
+        EntryType::Directory => paint_settings.dir_paint,
+        EntryType::Symlink   => paint_settings.symlink_paint,
+        EntryType::Unknown   => paint_settings.unknown_paint,
+        EntryType::Regular   =>
+            if let Some(paint) = maybe_paint_by_name(name) { paint }
+            else if executable { Paint::with_fg_bg(Color::Green, Color::Default).bold() }
+            else { paint_settings.file_paint },
+    }
+}
+
+fn maybe_paint_by_name(name: &str) -> Option<Paint> {
+    if      name.ends_with(".cpp")  { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
+    else if name.ends_with(".java") { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
+    else if name.ends_with(".rs")   { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
+    else if name.ends_with(".h")    { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
+    else if name.ends_with(".pdf")  { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
+    else if name.ends_with(".djvu") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
+    else if name.ends_with(".mp3")  { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)       ) }
+    else if name.ends_with(".webm") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)       ) }
+    else if name.ends_with(".png")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
+    else if name.ends_with(".gif")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
+    else if name.ends_with(".jpg")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
+    else if name.ends_with(".jpeg") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
+    else if name.ends_with(".mkv")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
+    else if name.ends_with(".avi")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
+    else if name.ends_with(".mp4")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
+    None
 }
 //-----------------------------------------------------------------------------
 #[derive(Clone)]

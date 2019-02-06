@@ -8,19 +8,19 @@ use std::ffi::OsStr;
 //-----------------------------------------------------------------------------
 // use std::time::{SystemTime};
 // use std::time::{UNIX_EPOCH};
-// use std::fs::OpenOptions;
-// use std::io::{Write};
 use std::io::{Read};
 use std::fs::File;
 use std::os::unix::fs::PermissionsExt;
 
-// pub fn log(s: &str) {
-//     // let name = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string();
-//     let name = "log.txt";
-//     let mut file = OpenOptions::new().append(true).create(true).open(name).unwrap();
-//     file.write_all(s.as_bytes()).unwrap();
-//     file.write_all(b"\n").unwrap();
-// }
+use std::fs::OpenOptions;
+use std::io::{Write};
+pub fn log(s: &str) {
+    // let name = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string();
+    let name = "log.txt";
+    let mut file = OpenOptions::new().append(true).create(true).open(name).unwrap();
+    file.write_all(s.as_bytes()).unwrap();
+    file.write_all(b"\n").unwrap();
+}
 //-----------------------------------------------------------------------------
 #[derive(Clone)]
 pub struct Permissions {
