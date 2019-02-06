@@ -371,7 +371,10 @@ impl System {
                 }).collect();
             for (src_path, dst_path) in data.src_paths.iter().zip(dst_paths.iter()) {
                 let mut src = path_to_string(src_path);
-                if is_dir(src_path) { src += "/."; } // so that cp works as we want
+                match data.transfer_type {
+                    TransferType::Cut  => if is_dir(src_path) { src += "/"; },
+                    TransferType::Yank => if is_dir(src_path) { src += "/."; },
+                }
 
                 let dst = path_to_string(dst_path);
                 match data.transfer_type {
