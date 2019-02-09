@@ -93,7 +93,7 @@ pub fn generate_possible_inputs() -> Matches {
     insert(regular("sa"), Command::Sort(SortingType::Any));
     insert(regular("gh"), Command::GoTo("/home/igorek/"));
     insert(regular("gd"), Command::GoTo("/home/igorek/Downloads"));
-    insert(regular("gs"), Command::GoTo("/home/igorek/Studying"));
+    insert(regular("gs"), Command::GoTo("/home/igorek/Semester 7/Studying"));
     insert(regular("gS"), Command::GoTo("/home/igorek/Storage"));
     insert(regular("gT"), Command::GoTo("/home/igorek/Storage/torrents"));
     insert(regular("gc"), Command::GoTo("/home/igorek/screenshots"));

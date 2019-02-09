@@ -3,7 +3,7 @@ use pancurses::{Window, initscr, start_color, use_default_colors, noecho, half_d
     ACS_LLCORNER, ACS_LRCORNER, ACS_ULCORNER, ACS_URCORNER};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::RangeBounds;
 use std::ffi::OsStr;
 use std::process::Child;
@@ -290,7 +290,8 @@ impl System {
 
         add_to_apps(&mut apps_extensions, "vim @", System::text_extensions(), not_external);
         add_to_apps(&mut apps_exact_names, "vim @", System::text_exact_names(), not_external);
-        add_to_apps(&mut apps_extensions, "vlc @", vec!["mkv", "avi", "mp4", "mp3"], external);
+        add_to_apps(&mut apps_extensions, "vlc @", vec!["mkv", "avi", "mp4", "mp3", "m4b"], external);
+        add_to_apps(&mut apps_extensions, "zathura @", vec!["pdf", "djvu"], external);
         add_to_apps(&mut apps_extensions, "rifle_sxiv @", vec!["jpg", "jpeg", "png"], external);
 
         let mut patterns: Vec<SpawnPattern> = Vec::new();
@@ -444,6 +445,31 @@ impl System {
         self.context_mut().cumulative_size_text = Some("Size: ".to_string() + &System::human_size(size));
     }
 //-----------------------------------------------------------------------------
+    fn maybe_sync_backup_selection_for_current_siblings(&mut self) {
+        if self.doing_search() {
+            for (name, selected) in self.context_ref().current_siblings.iter()
+                    .map(|entry| (entry.name.clone(), entry.is_selected))
+                    .collect::<Vec<(String, bool)>>() {
+                self.sync_backup_selection(&name, selected);
+            }
+        }
+    }
+
+    fn sync_backup_selection(&mut self, name: &str, selected: bool) {
+        if let Some(SearchTools {current_siblings_backup, ..}) = &mut self.context_mut().search_tools {
+            for entry in current_siblings_backup.iter_mut() {
+                if entry.name == name {
+                    entry.is_selected = selected;
+                    break;
+                }
+            }
+        }
+    }
+
+    fn doing_search(&self) -> bool {
+        self.context_ref().search_tools.is_some()
+    }
+
     fn collect_entries_that_match(orig: &Vec<DirEntry>, pattern: &str) -> Vec<DirEntry> {
         orig.iter().filter(|e| System::contains_pattern(&e.name, &pattern)).map(|e| e.clone()).collect()
     }
@@ -474,10 +500,10 @@ impl System {
     }
 
     fn reset_search_tools_and_restore_siblings(&mut self) {
-        self.context_mut().current_siblings =
-            self.context_mut().search_tools.as_mut().unwrap()
-            .current_siblings_backup.drain(..)
-            .collect();
+        if let Some(search_tools) = self.context_mut().search_tools.as_mut() {
+            self.context_mut().current_siblings =
+                search_tools.current_siblings_backup.drain(..).collect();
+        }
         self.reset_search_tools();
     }
 
@@ -527,6 +553,14 @@ impl System {
         }
     }
 
+    // fn update_search_siblings_entry(&mut self, name: &str, selected: bool) {
+    //     if let Some(search_tools) = self.context_mut().search_tools.as_mut() {
+    //         search_tools.current_siblings_backup.iter_mut()
+    //             .find(|entry| entry.name == name)
+    //             .unwrap().is_selected = selected;
+    //     }
+    // }
+
     fn contains_pattern(string: &str, pattern: &str) -> bool {
         let pattern_lowercase = pattern.to_lowercase();
         let case_sensitive = pattern_lowercase != pattern;
@@ -552,7 +586,7 @@ impl System {
         else { osstr_to_str(path.file_name().unwrap()).to_string() }
     }
 
-    // Returns whether is was the last Tab (then perhaps whether we should terminate)
+    // Returns whether it was the last Tab (perhaps whether we should terminate)
     pub fn close_tab(&mut self) -> bool {
         self.tabs.remove(self.current_tab_index);
         if self.tabs.is_empty() {
@@ -564,6 +598,8 @@ impl System {
     }
 
     pub fn new_tab(&mut self) {
+        const MAX_TABS: usize = 8;
+        if self.tabs.len() + 1 > MAX_TABS { return; }
         // The trick here is that we create a copy of the current tab and refer
         // to the copy as to the old tab, and start reigning in the new one
         self.tabs.push(self.current_tab_ref().clone());
@@ -1036,14 +1072,24 @@ impl System {
     pub fn select_under_cursor(&mut self) {
         if let Some(path) = self.context_ref().current_path.as_ref() {
             if let Some(index) = self.maybe_index_of_self_selected(path) {
+                // Unselect
                 self.selected.remove(index);
                 assert!(self.unsafe_current_entry_mut().is_selected);
                 self.unsafe_current_entry_mut().is_selected = false;
             } else {
+                // Select
                 self.selected.push(path.clone());
                 assert!(!self.unsafe_current_entry_mut().is_selected);
                 self.unsafe_current_entry_mut().is_selected = true;
             }
+
+            if self.doing_search() {
+                let selected = self.unsafe_current_entry_ref().is_selected;
+                let name = self.unsafe_current_entry_ref().name.clone();
+                self.sync_backup_selection(&name, selected);
+            }
+
+            self.down(); // for user convenience
         }
     }
 
@@ -1057,23 +1103,33 @@ impl System {
         if let Some(siblings) = self.context_mut().right_column.siblings_mut() {
             siblings.iter_mut().for_each(|e| e.is_selected = false);
         }
+
+        self.maybe_sync_backup_selection_for_current_siblings();
     }
 
     pub fn invert_selection(&mut self) {
-        // Leave only those that are not from current dir
         let parent_path = self.context_ref().parent_path.clone();
-        self.selected.retain(|path| path.parent().unwrap() != parent_path);
+
+        // Remove those that were among current siblings and were selected
+        let to_remove = self.context_ref().current_siblings.iter()
+            .filter(|e| e.is_selected)
+            .map(|e| parent_path.join(&e.name))
+            .collect::<HashSet<_>>();
+        self.selected.retain(|path| !to_remove.contains(path));
 
         // Flip selection
         self.context_mut().current_siblings.iter_mut()
             .for_each(|e| e.is_selected = !e.is_selected);
 
         // Add new selected ones to the selected list
-        self.selected.append(
-            &mut self.context_ref().current_siblings.iter()
-                .filter(|entry| entry.is_selected)
-                .map(|e| parent_path.join(&e.name))
-                .collect());
+        let mut to_add = self.context_ref().current_siblings.iter()
+            .filter(|e| e.is_selected)
+            .map(|e| parent_path.join(&e.name))
+            .collect();
+        self.selected.append(&mut to_add);
+
+        // Sync
+        self.maybe_sync_backup_selection_for_current_siblings();
     }
 //-----------------------------------------------------------------------------
     fn clear(&self, cs: &mut ColorSystem) {
