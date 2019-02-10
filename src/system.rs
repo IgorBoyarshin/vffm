@@ -452,23 +452,28 @@ impl System {
         }
     }
 
+    fn rename(path: &PathBuf, new_name: &str) {
+        let new_path = path.parent().unwrap().join(new_name);
+        System::spawn_process_wait("mv", vec![path_to_str(path), path_to_str(&new_path)]);
+    }
+
     pub fn get_cumulative_size(&mut self) {
         if self.inside_empty_dir() { return }
         let size = cumulative_size(self.context_ref().current_path.as_ref().unwrap());
         self.context_mut().cumulative_size_text = Some("Size: ".to_string() + &System::human_size(size));
     }
 //-----------------------------------------------------------------------------
-    fn maybe_sync_backup_selection_for_current_siblings(&mut self) {
+    fn maybe_sync_search_backup_selection_for_current_siblings(&mut self) {
         if self.doing_search() {
             for (name, selected) in self.context_ref().current_siblings.iter()
                     .map(|entry| (entry.name.clone(), entry.is_selected))
                     .collect::<Vec<(String, bool)>>() {
-                self.sync_backup_selection(&name, selected);
+                self.sync_backup_selection_for_search(&name, selected);
             }
         }
     }
 
-    fn sync_backup_selection(&mut self, name: &str, selected: bool) {
+    fn sync_backup_selection_for_search(&mut self, name: &str, selected: bool) {
         if let Some(InputMode::Search(SearchTools {current_siblings_backup, ..})) = &mut self.context_mut().input_mode {
             for entry in current_siblings_backup.iter_mut() {
                 if entry.name == name {
@@ -488,11 +493,23 @@ impl System {
         orig.iter().filter(|e| System::contains_pattern(&e.name, &pattern)).map(|e| e.clone()).collect()
     }
 
+    pub fn start_changing_current_name(&mut self) {
+        if self.inside_empty_dir() { return; }
+        let old_name = self.unsafe_current_entry_ref().name.clone();
+        let old_name_len = old_name.len();
+        self.context_mut().input_mode = Some(InputMode::ChangeName(ChangeNameTools {
+            new_name: old_name,
+            cursor_index: old_name_len,
+        }));
+        System::reveal_cursor();
+    }
+
+    // XXX: Expects that it is not possible to directly switch from one mode to another
     pub fn start_search(&mut self) {
-        // XXX: Expects that it is not possible to directly switch from one mode to another
         if let Some(InputMode::Search(search_tools)) = self.context_mut().input_mode.as_mut() {
+            // Continue previously started search
             search_tools.cursor_index = Some(search_tools.query.len());
-        } else {
+        } else { // create a new search instance
             self.context_mut().input_mode = Some(InputMode::Search(SearchTools {
                 query: "".to_string(),
                 cursor_index: Some(0),
@@ -516,26 +533,52 @@ impl System {
     }
 
     pub fn cancel_input(&mut self) {
+        let was_doing_search = match self.context_ref().input_mode {
+            Some(InputMode::Search(_)) => true,
+            _ => false,
+        };
         self.reset_input_mode_and_restore();
-        self.update_current_without_siblings();
+        if was_doing_search {
+            self.update_current_without_siblings();
+        }
     }
 
     pub fn confirm_input(&mut self) {
-        match self.context_mut().input_mode.as_mut() {
-            Some(InputMode::Search(search_tools)) => search_tools.cursor_index = None,
-            Some(InputMode::ChangeName(_change_name_tools)) => {},
-            _ => {},
+        if let Some(InputMode::Search(search_tools)) = self.context_mut().input_mode.as_mut() {
+            search_tools.cursor_index = None;
+        } else if let Some(InputMode::ChangeName(ChangeNameTools {new_name, ..})) =
+                self.context_ref().input_mode.as_ref() {
+            System::rename(self.context_ref().current_path.as_ref().unwrap(), &new_name);
+            self.update_current();
+            self.context_mut().input_mode = None;
         }
-        // self.context_mut().search_tools.as_mut().unwrap().cursor_index = None;
         System::hide_cursor();
     }
 
-    // Could have been terminated already upon this call => system has no context
+    pub fn move_input_cursor_left(&mut self) {
+        if let Some(InputMode::ChangeName(ChangeNameTools {cursor_index, ..})) =
+                self.context_mut().input_mode.as_mut() {
+            if *cursor_index >= 1 {
+                *cursor_index -= 1;
+            }
+        }
+    }
+
+    pub fn move_input_cursor_right(&mut self) {
+        if let Some(InputMode::ChangeName(ChangeNameTools {cursor_index, new_name})) =
+                self.context_mut().input_mode.as_mut() {
+            if *cursor_index + 1 <= new_name.len() { // allow one after end of text
+                *cursor_index += 1;
+            }
+        }
+    }
+
+    // Could have been terminated already upon this call => system would have no context
     pub fn inside_input_mode(&self) -> bool {
         if !self.have_context() { return false; }
         match self.context_ref().input_mode.as_ref() {
             Some(InputMode::Search(search_tools)) => search_tools.cursor_index.is_some(),
-            // TODO: about change_name
+            Some(InputMode::ChangeName(_)) => true,
             _ => false,
         }
     }
@@ -544,35 +587,57 @@ impl System {
     // performing an insertion step
     pub fn insert_input(&mut self, c: char) {
         if System::valid_input(c) {
-            let mode = self.context_mut().input_mode.as_mut();
-            if let Some(InputMode::Search(search_tools)) = mode {
-                search_tools.query.push(c);
-                search_tools.cursor_index.as_mut().map(|index| *index += 1);
-                // Optimization: search only among the last known matches because the new ones
-                // must be a subset of them due to appending chars to the end of query
-                let pattern = search_tools.query.clone();
-                self.context_mut().current_siblings.retain(|entry|
-                    System::contains_pattern(&entry.name, &pattern));
-                self.update_current_without_siblings();
-            } else if let Some(InputMode::ChangeName(_change_name_tools)) = mode {
-
+            match self.context_mut().input_mode.as_mut() {
+                Some(InputMode::Search(search_tools)) => {
+                    search_tools.query.push(c);
+                    search_tools.cursor_index.as_mut().map(|index| *index += 1);
+                    // Optimization: search only among the last known matches because the new ones
+                    // must be a subset of them due to appending chars to the end of query
+                    let pattern = search_tools.query.clone();
+                    self.context_mut().current_siblings.retain(|entry|
+                        System::contains_pattern(&entry.name, &pattern));
+                    self.update_current_without_siblings();
+                },
+                Some(InputMode::ChangeName(ChangeNameTools {cursor_index, new_name})) => {
+                    // Trusts that the cursor index is valid
+                    new_name.insert(*cursor_index, c);
+                    *cursor_index += 1;
+                },
+                _ => {},
             }
         }
     }
 
-    pub fn pop_input(&mut self) {
-        let mode = self.context_mut().input_mode.as_mut();
-        if let Some(InputMode::Search(SearchTools {query, cursor_index, current_siblings_backup})) = mode {
-            if query.len() > 0 {
-                query.pop();
-                let pattern = query.clone();
-                cursor_index.as_mut().map(|index| *index -= 1);
-                self.context_mut().current_siblings = System::collect_entries_that_match(
-                    &current_siblings_backup, &pattern);
-                self.update_current_without_siblings();
-            }
-        } else if let Some(InputMode::ChangeName(_change_name_tools)) = mode {
+    pub fn remove_input_before_cursor(&mut self) {
+        match self.context_mut().input_mode.as_mut() {
+            Some(InputMode::Search(SearchTools {query, cursor_index, current_siblings_backup})) => {
+                if query.len() > 0 {
+                    query.pop();
+                    cursor_index.as_mut().map(|index| *index -= 1);
 
+                    let pattern = query.clone();
+                    self.context_mut().current_siblings = System::collect_entries_that_match(
+                        &current_siblings_backup, &pattern);
+                    self.update_current_without_siblings();
+                }
+            },
+            Some(InputMode::ChangeName(ChangeNameTools {cursor_index, new_name})) => {
+                // Trusts that the cursor index is valid
+                if *cursor_index > 0 {
+                    *cursor_index -= 1;
+                    new_name.remove(*cursor_index);
+                }
+            },
+            _ => {},
+        }
+    }
+
+    pub fn remove_input_under_cursor(&mut self) {
+        match self.context_mut().input_mode.as_mut() {
+            Some(InputMode::ChangeName(ChangeNameTools {cursor_index, new_name})) => {
+                new_name.remove(*cursor_index);
+            },
+            _ => {},
         }
     }
 
@@ -1105,7 +1170,7 @@ impl System {
             if self.doing_search() {
                 let selected = self.unsafe_current_entry_ref().is_selected;
                 let name = self.unsafe_current_entry_ref().name.clone();
-                self.sync_backup_selection(&name, selected);
+                self.sync_backup_selection_for_search(&name, selected);
             }
 
             self.down(); // for user convenience
@@ -1123,7 +1188,7 @@ impl System {
             siblings.iter_mut().for_each(|e| e.is_selected = false);
         }
 
-        self.maybe_sync_backup_selection_for_current_siblings();
+        self.maybe_sync_search_backup_selection_for_current_siblings();
     }
 
     pub fn invert_selection(&mut self) {
@@ -1148,7 +1213,7 @@ impl System {
         self.selected.append(&mut to_add);
 
         // Sync
-        self.maybe_sync_backup_selection_for_current_siblings();
+        self.maybe_sync_search_backup_selection_for_current_siblings();
     }
 //-----------------------------------------------------------------------------
     fn clear(&self, cs: &mut ColorSystem) {
@@ -1185,15 +1250,7 @@ impl System {
         let mut top_bar = Bar::with_y_and_width(0, self.display_settings.width);
         self.draw_tabs(&mut cs, &mut top_bar);
 
-        // Put visible cursor after the input mode text, so that the user sees where he types
-        match self.context_ref().input_mode.as_ref() {
-            Some(InputMode::Search(SearchTools {cursor_index, ..})) => {
-                if let Some(index) = cursor_index {
-                    self.window.mv(self.display_settings.height - 1, 1 + *index as Coord);
-                }
-            },
-            _ => {},
-        }
+        self.maybe_draw_input_mode_cursor();
 
         self.window.refresh();
     }
@@ -1275,10 +1332,33 @@ impl System {
     fn maybe_draw_input_mode(&self, cs: &mut ColorSystem, bar: &mut Bar) {
         match self.context_ref().input_mode.as_ref() {
             Some(InputMode::Search(SearchTools {query, ..})) => {
-                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-                let text = "/".to_string() + query;
-                bar.draw_left(&self.window, &text, 2);
+                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default).bold());
+                bar.draw_left(&self.window, "/", 0);
+                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Purple, Color::Default));
+                bar.draw_left(&self.window, query, 2);
             },
+            Some(InputMode::ChangeName(ChangeNameTools {new_name, ..})) => {
+                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default).bold());
+                bar.draw_left(&self.window, "change to:", 0);
+                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Purple, Color::Default));
+                bar.draw_left(&self.window, new_name, 2);
+            },
+            _ => {},
+        }
+    }
+
+    fn maybe_draw_input_mode_cursor(&self) {
+        match self.context_ref().input_mode.as_ref() {
+            Some(InputMode::Search(SearchTools {cursor_index, ..})) => {
+                if let Some(index) = cursor_index {
+                    const PREFIX_LEN: i32 = "/".len() as i32;
+                    self.window.mv(self.display_settings.height - 1, PREFIX_LEN + *index as Coord);
+                }
+            },
+            Some(InputMode::ChangeName(ChangeNameTools {cursor_index, ..})) => {
+                const PREFIX_LEN: i32 = "change to:".len() as i32;
+                self.window.mv(self.display_settings.height - 1, PREFIX_LEN + *cursor_index as Coord);
+            }
             _ => {},
         }
     }
@@ -1550,6 +1630,9 @@ impl System {
             Some(PInput::Character(c))      => Some(Input::Char(c)),
             Some(PInput::KeyBTab)           => Some(Input::ShiftTab),
             Some(PInput::KeyResize)         => Some(Input::EventResize),
+            Some(PInput::KeyLeft)           => Some(Input::Left),
+            Some(PInput::KeyRight)          => Some(Input::Right),
+            Some(PInput::KeyDC)             => Some(Input::Delete),
             None                            => None,
             _                               => Some(Input::Unknown),
         }

@@ -1,4 +1,5 @@
 #![feature(drain_filter)]
+#![feature(const_str_len)]
 
 // use std::{thread, time};
 
@@ -115,13 +116,16 @@ impl Overseer {
                 self.current_input = self.handle_combination(combination);
             } else if self.mode == Mode::Input {
                 match input {
-                    Input::Escape => self.system.cancel_input(),
-                    Input::Enter => self.system.confirm_input(),
-                    Input::Char(c) => self.system.insert_input(c),
-                    Input::Backspace => self.system.pop_input(),
-                    Input::Tab => self.current_input =
+                    Input::Escape    => self.system.cancel_input(),
+                    Input::Enter     => self.system.confirm_input(),
+                    Input::Char(c)   => self.system.insert_input(c),
+                    Input::Backspace => self.system.remove_input_before_cursor(),
+                    Input::Delete    => self.system.remove_input_under_cursor(),
+                    Input::Left      => self.system.move_input_cursor_left(),
+                    Input::Right     => self.system.move_input_cursor_right(),
+                    Input::Tab       => self.current_input =
                         self.handle_combination(Some(Combination::Tab)),
-                    Input::ShiftTab => self.current_input =
+                    Input::ShiftTab  => self.current_input =
                         self.handle_combination(Some(Combination::ShiftTab)),
                     _ => {},
                 };
@@ -166,7 +170,10 @@ impl Overseer {
             Command::CloseTab           => self.terminated = self.system.close_tab(),
             Command::NextTab            => self.system.next_tab(),
             Command::PreviousTab        => self.system.previous_tab(),
-            // Command::ChangeCurrentName  => {},
+            Command::ChangeCurrentName  => {
+                self.mode = Mode::Input;
+                self.system.start_changing_current_name();
+            },
             Command::EnterSearchMode    => {
                 self.mode = Mode::Input;
                 self.system.start_search();
