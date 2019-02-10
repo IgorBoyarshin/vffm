@@ -170,6 +170,8 @@ impl Overseer {
             Command::CloseTab           => self.terminated = self.system.close_tab(),
             Command::NextTab            => self.system.next_tab(),
             Command::PreviousTab        => self.system.previous_tab(),
+            Command::Home               => self.system.go_home(),
+            Command::End                => self.system.go_end(),
             Command::ChangeCurrentName  => {
                 self.mode = Mode::Input;
                 self.system.start_changing_current_name();
@@ -177,6 +179,10 @@ impl Overseer {
             Command::EnterSearchMode    => {
                 self.mode = Mode::Input;
                 self.system.start_search();
+            },
+            Command::EnterCommand       => {
+                self.mode = Mode::Input;
+                self.system.start_command();
             },
         }
     }

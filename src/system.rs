@@ -19,7 +19,7 @@ use crate::input::*;
 enum InputMode {
     Search(SearchTools),
     ChangeName(ChangeNameTools),
-    // command,
+    Command(CommandTools),
 }
 
 #[derive(Clone)]
@@ -32,6 +32,12 @@ struct SearchTools {
 #[derive(Clone)]
 struct ChangeNameTools {
     new_name: String,
+    cursor_index: usize,
+}
+
+#[derive(Clone)]
+struct CommandTools {
+    text: String,
     cursor_index: usize,
 }
 
@@ -339,6 +345,14 @@ impl System {
         None
     }
 
+    fn execute_command_from(path: &PathBuf, command: &str) {
+        let (app, args) = System::split_into_app_and_args(command);
+        Command::new(app).args(args)
+            .stderr(Stdio::null()).stdout(Stdio::piped())
+            .current_dir(path)
+            .spawn().expect("failed to execute process");
+    }
+
     fn spawn_process_async<S: AsRef<OsStr>>(app: &str, args: Vec<S>) -> Child {
         Command::new(app).args(args)
             .stderr(Stdio::null()).stdout(Stdio::piped())
@@ -457,6 +471,25 @@ impl System {
         System::spawn_process_wait("mv", vec![path_to_str(path), path_to_str(&new_path)]);
     }
 
+    fn split_into_app_and_args(text: &str) -> (&str, Vec<String>) {
+        let mut parts = text.split_whitespace();
+        let app = parts.next().unwrap();
+        let mut args = Vec::new();
+        for part in parts {
+            if part.starts_with("-") && !part.starts_with("--") {
+                // Assume valid format like -fLaG
+                for c in part.chars().skip(1) {
+                    let mut arg = "-".to_string();
+                    arg.push(c);
+                    args.push(arg);
+                }
+            } else {
+                args.push(part.to_string());
+            }
+        }
+        (app, args)
+    }
+
     pub fn get_cumulative_size(&mut self) {
         if self.inside_empty_dir() { return }
         let size = cumulative_size(self.context_ref().current_path.as_ref().unwrap());
@@ -474,7 +507,8 @@ impl System {
     }
 
     fn sync_backup_selection_for_search(&mut self, name: &str, selected: bool) {
-        if let Some(InputMode::Search(SearchTools {current_siblings_backup, ..})) = &mut self.context_mut().input_mode {
+        if let Some(InputMode::Search(SearchTools {current_siblings_backup, ..})) =
+                &mut self.context_mut().input_mode {
             for entry in current_siblings_backup.iter_mut() {
                 if entry.name == name {
                     entry.is_selected = selected;
@@ -500,6 +534,14 @@ impl System {
         self.context_mut().input_mode = Some(InputMode::ChangeName(ChangeNameTools {
             new_name: old_name,
             cursor_index: old_name_len,
+        }));
+        System::reveal_cursor();
+    }
+
+    pub fn start_command(&mut self) {
+        self.context_mut().input_mode = Some(InputMode::Command(CommandTools {
+            text: String::new(),
+            cursor_index: 0,
         }));
         System::reveal_cursor();
     }
@@ -551,12 +593,24 @@ impl System {
             System::rename(self.context_ref().current_path.as_ref().unwrap(), &new_name);
             self.update_current();
             self.context_mut().input_mode = None;
+        } else if let Some(InputMode::Command(CommandTools {text, ..})) =
+                self.context_ref().input_mode.as_ref() {
+            System::execute_command_from(&self.context_ref().parent_path, text);
+            // Don't update because the process is async and probably
+            // hasn't finished yet => no use updating.
+            // self.update_current();
+            self.context_mut().input_mode = None;
         }
         System::hide_cursor();
     }
 
     pub fn move_input_cursor_left(&mut self) {
         if let Some(InputMode::ChangeName(ChangeNameTools {cursor_index, ..})) =
+                self.context_mut().input_mode.as_mut() {
+            if *cursor_index >= 1 {
+                *cursor_index -= 1;
+            }
+        } else if let Some(InputMode::Command(CommandTools {cursor_index, ..})) =
                 self.context_mut().input_mode.as_mut() {
             if *cursor_index >= 1 {
                 *cursor_index -= 1;
@@ -570,6 +624,11 @@ impl System {
             if *cursor_index + 1 <= new_name.len() { // allow one after end of text
                 *cursor_index += 1;
             }
+        } else if let Some(InputMode::Command(CommandTools {cursor_index, text})) =
+                self.context_mut().input_mode.as_mut() {
+            if *cursor_index + 1 <= text.len() { // allow one after end of text
+                *cursor_index += 1;
+            }
         }
     }
 
@@ -579,6 +638,7 @@ impl System {
         match self.context_ref().input_mode.as_ref() {
             Some(InputMode::Search(search_tools)) => search_tools.cursor_index.is_some(),
             Some(InputMode::ChangeName(_)) => true,
+            Some(InputMode::Command(_)) => true,
             _ => false,
         }
     }
@@ -601,6 +661,11 @@ impl System {
                 Some(InputMode::ChangeName(ChangeNameTools {cursor_index, new_name})) => {
                     // Trusts that the cursor index is valid
                     new_name.insert(*cursor_index, c);
+                    *cursor_index += 1;
+                },
+                Some(InputMode::Command(CommandTools {cursor_index, text})) => {
+                    // Trusts that the cursor index is valid
+                    text.insert(*cursor_index, c);
                     *cursor_index += 1;
                 },
                 _ => {},
@@ -628,6 +693,13 @@ impl System {
                     new_name.remove(*cursor_index);
                 }
             },
+            Some(InputMode::Command(CommandTools {cursor_index, text})) => {
+                // Trusts that the cursor index is valid
+                if *cursor_index > 0 {
+                    *cursor_index -= 1;
+                    text.remove(*cursor_index);
+                }
+            },
             _ => {},
         }
     }
@@ -636,6 +708,9 @@ impl System {
         match self.context_mut().input_mode.as_mut() {
             Some(InputMode::ChangeName(ChangeNameTools {cursor_index, new_name})) => {
                 new_name.remove(*cursor_index);
+            },
+            Some(InputMode::Command(CommandTools {cursor_index, text})) => {
+                text.remove(*cursor_index);
             },
             _ => {},
         }
@@ -1093,6 +1168,18 @@ impl System {
         self.context_mut().cumulative_size_text = None;
         self.update();
     }
+
+    pub fn go_home(&mut self) {
+        if self.inside_empty_dir() { return }
+        self.context_mut().current_index = 0;
+        self.update_current_entry_by_index();
+    }
+
+    pub fn go_end(&mut self) {
+        if self.inside_empty_dir() { return }
+        self.context_mut().current_index = self.context_ref().current_siblings.len() - 1;
+        self.update_current_entry_by_index();
+    }
 //-----------------------------------------------------------------------------
     fn list_entry(&self, cs: &mut ColorSystem, column_index: usize,
             y: usize, entry: &DirEntry, under_cursor: bool, selected: bool) {
@@ -1343,6 +1430,12 @@ impl System {
                 cs.set_paint(&self.window, Paint::with_fg_bg(Color::Purple, Color::Default));
                 bar.draw_left(&self.window, new_name, 2);
             },
+            Some(InputMode::Command(CommandTools {text, ..})) => {
+                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default).bold());
+                bar.draw_left(&self.window, ":> ", 0);
+                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Purple, Color::Default));
+                bar.draw_left(&self.window, text, 2);
+            },
             _ => {},
         }
     }
@@ -1357,6 +1450,10 @@ impl System {
             },
             Some(InputMode::ChangeName(ChangeNameTools {cursor_index, ..})) => {
                 const PREFIX_LEN: i32 = "change to:".len() as i32;
+                self.window.mv(self.display_settings.height - 1, PREFIX_LEN + *cursor_index as Coord);
+            }
+            Some(InputMode::Command(CommandTools {cursor_index, ..})) => {
+                const PREFIX_LEN: i32 = ":> ".len() as i32;
                 self.window.mv(self.display_settings.height - 1, PREFIX_LEN + *cursor_index as Coord);
             }
             _ => {},

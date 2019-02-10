@@ -57,6 +57,9 @@ pub enum Command {
     PreviousTab,
     EnterSearchMode,
     ChangeCurrentName,
+    EnterCommand,
+    Home,
+    End,
 }
 
 
@@ -119,6 +122,9 @@ pub fn generate_possible_inputs() -> Matches {
     insert(regular("t"),          Command::NewTab);
     insert(regular("/"),          Command::EnterSearchMode);
     insert(regular("cw"),         Command::ChangeCurrentName);
+    insert(regular("!"),          Command::EnterCommand);
+    insert(regular("gg"),         Command::Home);
+    insert(regular("G"),          Command::End);
     inputs
 }
 
@@ -146,6 +152,9 @@ pub fn description_of(command: &Command) -> String {
         Command::PreviousTab => "Selects the previous Tab (if any) as the new current tab".to_string(),
         Command::EnterSearchMode => "Go inside the search bar to edit the query".to_string(),
         Command::ChangeCurrentName => "Change the name of the current entry".to_string(),
+        Command::EnterCommand => "Execute an external command".to_string(),
+        Command::Home => "Go to the beginning of the current directory".to_string(),
+        Command::End => "Go to the end of the current directory".to_string(),
     }
 }
 
