@@ -16,10 +16,23 @@ use crate::input::*;
 
 //-----------------------------------------------------------------------------
 #[derive(Clone)]
+enum InputMode {
+    Search(SearchTools),
+    ChangeName(ChangeNameTools),
+    // command,
+}
+
+#[derive(Clone)]
 struct SearchTools {
     query: String,
     cursor_index: Option<usize>, // None if not if focus
     current_siblings_backup: Vec<DirEntry>,
+}
+
+#[derive(Clone)]
+struct ChangeNameTools {
+    new_name: String,
+    cursor_index: usize,
 }
 
 pub struct Settings {
@@ -68,7 +81,7 @@ struct Context {
     additional_entry_info: Option<String>,
     cumulative_size_text: Option<String>,
 
-    search_tools: Option<SearchTools>,
+    input_mode: Option<InputMode>,
 }
 //-----------------------------------------------------------------------------
 pub struct System {
@@ -178,7 +191,7 @@ impl System {
             current_siblings_shift,
             cumulative_size_text: None, // for CumulativeSize
 
-            search_tools: None,
+            input_mode: None,
         }
     }
 
@@ -456,7 +469,7 @@ impl System {
     }
 
     fn sync_backup_selection(&mut self, name: &str, selected: bool) {
-        if let Some(SearchTools {current_siblings_backup, ..}) = &mut self.context_mut().search_tools {
+        if let Some(InputMode::Search(SearchTools {current_siblings_backup, ..})) = &mut self.context_mut().input_mode {
             for entry in current_siblings_backup.iter_mut() {
                 if entry.name == name {
                     entry.is_selected = selected;
@@ -467,67 +480,72 @@ impl System {
     }
 
     fn doing_search(&self) -> bool {
-        self.context_ref().search_tools.is_some()
+        if let Some(InputMode::Search(_)) = self.context_ref().input_mode { true }
+        else { false }
     }
 
     fn collect_entries_that_match(orig: &Vec<DirEntry>, pattern: &str) -> Vec<DirEntry> {
         orig.iter().filter(|e| System::contains_pattern(&e.name, &pattern)).map(|e| e.clone()).collect()
     }
 
-    // fn queried_siblings
     pub fn start_search(&mut self) {
-        if let Some(search_tools) = self.context_mut().search_tools.as_mut() {
+        // XXX: Expects that it is not possible to directly switch from one mode to another
+        if let Some(InputMode::Search(search_tools)) = self.context_mut().input_mode.as_mut() {
             search_tools.cursor_index = Some(search_tools.query.len());
         } else {
-            self.context_mut().search_tools = Some(SearchTools {
+            self.context_mut().input_mode = Some(InputMode::Search(SearchTools {
                 query: "".to_string(),
                 cursor_index: Some(0),
                 current_siblings_backup: self.context_ref().current_siblings.clone(),
-            });
+            }));
         }
         System::reveal_cursor();
     }
 
-    fn reset_search_tools(&mut self) {
-        self.context_mut().search_tools = None;
-        // self.context_mut().search_query = None;
-        // self.context_mut().search_cursor_index = None;
-        // // The following line isn't necessary. The backup is either drained or lies dormant until
-        // // it is reinitialized inside start_search. So there is no harm keeping it aside from
-        // // storing it in memory. But just to be safe, let's clear it here anyway:
-        // self.context_mut().current_siblings_backup = Vec::new();
+    fn reset_input_mode(&mut self) {
+        self.context_mut().input_mode = None;
         System::hide_cursor();
     }
 
-    fn reset_search_tools_and_restore_siblings(&mut self) {
-        if let Some(search_tools) = self.context_mut().search_tools.as_mut() {
+    fn reset_input_mode_and_restore(&mut self) {
+        if let Some(InputMode::Search(search_tools)) = self.context_mut().input_mode.as_mut() {
             self.context_mut().current_siblings =
                 search_tools.current_siblings_backup.drain(..).collect();
-        }
-        self.reset_search_tools();
+        } // other modes don't need any restoration
+        self.reset_input_mode();
     }
 
-    pub fn cancel_search(&mut self) {
-        self.reset_search_tools_and_restore_siblings();
+    pub fn cancel_input(&mut self) {
+        self.reset_input_mode_and_restore();
         self.update_current_without_siblings();
     }
 
-    pub fn confirm_search(&mut self) {
-        self.context_mut().search_tools.as_mut().unwrap().cursor_index = None;
+    pub fn confirm_input(&mut self) {
+        match self.context_mut().input_mode.as_mut() {
+            Some(InputMode::Search(search_tools)) => search_tools.cursor_index = None,
+            Some(InputMode::ChangeName(_change_name_tools)) => {},
+            _ => {},
+        }
+        // self.context_mut().search_tools.as_mut().unwrap().cursor_index = None;
         System::hide_cursor();
     }
 
-    pub fn inside_search_bar(&self) -> bool {
-        if let Some(SearchTools {cursor_index, ..}) = self.context_ref().search_tools.as_ref() {
-            return cursor_index.is_some();
-        } else { false }
+    // Could have been terminated already upon this call => system has no context
+    pub fn inside_input_mode(&self) -> bool {
+        if !self.have_context() { return false; }
+        match self.context_ref().input_mode.as_ref() {
+            Some(InputMode::Search(search_tools)) => search_tools.cursor_index.is_some(),
+            // TODO: about change_name
+            _ => false,
+        }
     }
 
     // !!! The fact that new chars are inserted at the end is used as an optimization while
     // performing an insertion step
     pub fn insert_input(&mut self, c: char) {
         if System::valid_input(c) {
-            if let Some(search_tools) = self.context_mut().search_tools.as_mut() {
+            let mode = self.context_mut().input_mode.as_mut();
+            if let Some(InputMode::Search(search_tools)) = mode {
                 search_tools.query.push(c);
                 search_tools.cursor_index.as_mut().map(|index| *index += 1);
                 // Optimization: search only among the last known matches because the new ones
@@ -536,12 +554,15 @@ impl System {
                 self.context_mut().current_siblings.retain(|entry|
                     System::contains_pattern(&entry.name, &pattern));
                 self.update_current_without_siblings();
+            } else if let Some(InputMode::ChangeName(_change_name_tools)) = mode {
+
             }
         }
     }
 
     pub fn pop_input(&mut self) {
-        if let Some(SearchTools {query, cursor_index, current_siblings_backup}) = self.context_mut().search_tools.as_mut() {
+        let mode = self.context_mut().input_mode.as_mut();
+        if let Some(InputMode::Search(SearchTools {query, cursor_index, current_siblings_backup})) = mode {
             if query.len() > 0 {
                 query.pop();
                 let pattern = query.clone();
@@ -550,16 +571,10 @@ impl System {
                     &current_siblings_backup, &pattern);
                 self.update_current_without_siblings();
             }
+        } else if let Some(InputMode::ChangeName(_change_name_tools)) = mode {
+
         }
     }
-
-    // fn update_search_siblings_entry(&mut self, name: &str, selected: bool) {
-    //     if let Some(search_tools) = self.context_mut().search_tools.as_mut() {
-    //         search_tools.current_siblings_backup.iter_mut()
-    //             .find(|entry| entry.name == name)
-    //             .unwrap().is_selected = selected;
-    //     }
-    // }
 
     fn contains_pattern(string: &str, pattern: &str) -> bool {
         let pattern_lowercase = pattern.to_lowercase();
@@ -603,7 +618,7 @@ impl System {
         // The trick here is that we create a copy of the current tab and refer
         // to the copy as to the old tab, and start reigning in the new one
         self.tabs.push(self.current_tab_ref().clone());
-        self.reset_search_tools_and_restore_siblings();
+        self.reset_input_mode_and_restore(); // for the new tab
     }
 
     pub fn next_tab(&mut self) {
@@ -718,6 +733,10 @@ impl System {
 
     fn context_mut(&mut self) -> &mut Context {
         &mut self.current_tab_mut().context
+    }
+
+    fn have_context(&self) -> bool {
+        !self.tabs.is_empty()
     }
 
     fn inside_empty_dir(&self) -> bool {
@@ -938,7 +957,7 @@ impl System {
         self.context_mut().parent_siblings = self.collect_sorted_siblings_of_parent();
         self.context_mut().additional_entry_info = self.get_additional_entry_info_for_current();
         self.context_mut().current_permissions = self.get_current_permissions();
-        self.reset_search_tools();
+        self.reset_input_mode();
         self.update_current_tab_name();
     }
 //-----------------------------------------------------------------------------
@@ -1154,7 +1173,7 @@ impl System {
 
         let mut bottom_bar = Bar::with_y_and_width(
             self.display_settings.height - 1, self.display_settings.width);
-        self.maybe_draw_search_bar(&mut cs, &mut bottom_bar);
+        self.maybe_draw_input_mode(&mut cs, &mut bottom_bar);
         self.draw_current_permission(&mut cs, &mut bottom_bar);
         self.draw_current_size(&mut cs, &mut bottom_bar);
         self.maybe_draw_additional_info_for_current(&mut cs, &mut bottom_bar);
@@ -1166,11 +1185,14 @@ impl System {
         let mut top_bar = Bar::with_y_and_width(0, self.display_settings.width);
         self.draw_tabs(&mut cs, &mut top_bar);
 
-        // Put visible cursor after the search bar query, so that the user sees where he types
-        if let Some(SearchTools {cursor_index, ..}) = self.context_ref().search_tools.as_ref() {
-            if let Some(index) = cursor_index {
-                self.window.mv(self.display_settings.height - 1, 1 + *index as Coord);
-            }
+        // Put visible cursor after the input mode text, so that the user sees where he types
+        match self.context_ref().input_mode.as_ref() {
+            Some(InputMode::Search(SearchTools {cursor_index, ..})) => {
+                if let Some(index) = cursor_index {
+                    self.window.mv(self.display_settings.height - 1, 1 + *index as Coord);
+                }
+            },
+            _ => {},
         }
 
         self.window.refresh();
@@ -1250,11 +1272,14 @@ impl System {
         }
     }
 
-    fn maybe_draw_search_bar(&self, cs: &mut ColorSystem, bar: &mut Bar) {
-        if let Some(SearchTools {query, ..}) = self.context_ref().search_tools.as_ref() {
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-            let text = "/".to_string() + query;
-            bar.draw_left(&self.window, &text, 2);
+    fn maybe_draw_input_mode(&self, cs: &mut ColorSystem, bar: &mut Bar) {
+        match self.context_ref().input_mode.as_ref() {
+            Some(InputMode::Search(SearchTools {query, ..})) => {
+                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
+                let text = "/".to_string() + query;
+                bar.draw_left(&self.window, &text, 2);
+            },
+            _ => {},
         }
     }
 

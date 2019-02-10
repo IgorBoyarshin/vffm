@@ -115,8 +115,8 @@ impl Overseer {
                 self.current_input = self.handle_combination(combination);
             } else if self.mode == Mode::Input {
                 match input {
-                    Input::Escape => self.system.cancel_search(),
-                    Input::Enter => self.system.confirm_search(),
+                    Input::Escape => self.system.cancel_input(),
+                    Input::Enter => self.system.confirm_input(),
                     Input::Char(c) => self.system.insert_input(c),
                     Input::Backspace => self.system.pop_input(),
                     Input::Tab => self.current_input =
@@ -126,12 +126,10 @@ impl Overseer {
                     _ => {},
                 };
             }
-            if !self.terminated { // could have been terminated already => system has no context
-                self.mode = match self.system.inside_search_bar() {
-                    true  => Mode::Input,
-                    false => Mode::AwaitingCommand,
-                };
-            }
+            self.mode = match self.system.inside_input_mode() {
+                true  => Mode::Input,
+                false => Mode::AwaitingCommand,
+            };
         }
     }
 
