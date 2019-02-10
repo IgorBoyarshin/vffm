@@ -501,12 +501,12 @@ impl System {
             for (name, selected) in self.context_ref().current_siblings.iter()
                     .map(|entry| (entry.name.clone(), entry.is_selected))
                     .collect::<Vec<(String, bool)>>() {
-                self.sync_backup_selection_for_search(&name, selected);
+                self.sync_search_backup_selection_for(&name, selected);
             }
         }
     }
 
-    fn sync_backup_selection_for_search(&mut self, name: &str, selected: bool) {
+    fn sync_search_backup_selection_for(&mut self, name: &str, selected: bool) {
         if let Some(InputMode::Search(SearchTools {current_siblings_backup, ..})) =
                 &mut self.context_mut().input_mode {
             for entry in current_siblings_backup.iter_mut() {
@@ -717,6 +717,7 @@ impl System {
     }
 
     fn contains_pattern(string: &str, pattern: &str) -> bool {
+        if pattern.is_empty() { return true; }
         let pattern_lowercase = pattern.to_lowercase();
         let case_sensitive = pattern_lowercase != pattern;
         if case_sensitive { string               .contains( pattern          ) }
@@ -908,7 +909,17 @@ impl System {
 
     // Update central column and right column
     pub fn update_current(&mut self) {
-        self.context_mut().current_siblings = self.collect_sorted_children_of_parent();
+        let new_siblings = self.collect_sorted_children_of_parent();
+        if let Some(InputMode::Search(search_tools)) = self.context_ref().input_mode.as_ref() {
+            let pattern = search_tools.query.clone();
+            self.context_mut().current_siblings = System::collect_entries_that_match(
+                &new_siblings, &pattern);
+        }
+        if let Some(InputMode::Search(search_tools)) = self.context_mut().input_mode.as_mut() {
+            search_tools.current_siblings_backup = new_siblings;
+        } else {
+            self.context_mut().current_siblings = new_siblings;
+        }
         self.update_current_without_siblings();
     }
 
@@ -1257,7 +1268,7 @@ impl System {
             if self.doing_search() {
                 let selected = self.unsafe_current_entry_ref().is_selected;
                 let name = self.unsafe_current_entry_ref().name.clone();
-                self.sync_backup_selection_for_search(&name, selected);
+                self.sync_search_backup_selection_for(&name, selected);
             }
 
             self.down(); // for user convenience
