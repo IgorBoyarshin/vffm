@@ -1420,9 +1420,12 @@ impl System {
     }
 
     fn draw_current_path(&self, cs: &mut ColorSystem) {
-        if !self.inside_empty_dir() {
+        cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
+        if self.inside_empty_dir() {
+            let text = path_to_string(&self.context_ref().parent_path) + "/<?>";
+            mvprintw(&self.window, 0, 0, &text);
+        } else {
             let path = self.context_ref().current_path.as_ref().unwrap().to_str().unwrap();
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
             mvprintw(&self.window, 0, 0, path);
         }
     }
