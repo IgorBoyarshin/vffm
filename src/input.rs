@@ -60,6 +60,7 @@ pub enum Command {
     EnterCommand,
     Home,
     End,
+    ToggleHidden,
 }
 
 
@@ -125,6 +126,7 @@ pub fn generate_possible_inputs() -> Matches {
     insert(regular("!"),          Command::EnterCommand);
     insert(regular("gg"),         Command::Home);
     insert(regular("G"),          Command::End);
+    insert(regular("zh"),         Command::ToggleHidden);
     inputs
 }
 
@@ -155,6 +157,7 @@ pub fn description_of(command: &Command) -> String {
         Command::EnterCommand => "Execute an external command".to_string(),
         Command::Home => "Go to the beginning of the current directory".to_string(),
         Command::End => "Go to the end of the current directory".to_string(),
+        Command::ToggleHidden => "Toggle showing hidden files".to_string(),
     }
 }
 

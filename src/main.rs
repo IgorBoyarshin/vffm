@@ -172,6 +172,7 @@ impl Overseer {
             Command::PreviousTab        => self.system.previous_tab(),
             Command::Home               => self.system.go_home(),
             Command::End                => self.system.go_end(),
+            Command::ToggleHidden       => self.system.toggle_hidden(),
             Command::ChangeCurrentName  => {
                 self.mode = Mode::Input;
                 self.system.start_changing_current_name();

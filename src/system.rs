@@ -107,6 +107,8 @@ pub struct System {
 
     tabs: Vec<Tab>,
     current_tab_index: usize,
+
+    show_hidden: bool,
 }
 
 impl System {
@@ -114,12 +116,13 @@ impl System {
         let window = System::setup();
         System::set_drawing_delay(DrawingDelay::Regular);
 
+        let show_hidden = true; // TODO: move into Settings
         let selected = Vec::new();
         let sorting_type = SortingType::Lexicographically;
         let display_settings = System::generate_display_settings(
             &window, settings.scrolling_gap, &settings.columns_ratio);
         let context = System::generate_context(starting_path, &display_settings,
-                               &settings.paint_settings, &sorting_type, &selected);
+                               &settings.paint_settings, &sorting_type, show_hidden, &selected);
 
         System {
             window,
@@ -138,27 +141,29 @@ impl System {
 
             tabs: vec![Tab { name: System::tab_name_from_path(&context.parent_path), context }],
             current_tab_index: 0,
+            show_hidden,
         }
     }
 //-----------------------------------------------------------------------------
-    fn generate_context_for(&mut self, path: PathBuf) -> Context {
-        System::generate_context(path, &self.display_settings,
-            &self.settings.paint_settings, &self.sorting_type, &self.selected)
+    fn generate_context_for(&mut self, parent_path: PathBuf) -> Context {
+        System::generate_context(parent_path, &self.display_settings,
+            &self.settings.paint_settings, &self.sorting_type, self.show_hidden, &self.selected)
     }
 
     fn generate_context(parent_path: PathBuf,
                         display_settings: &DisplaySettings,
                         paint_settings: &PaintSettings,
                         sorting_type: &SortingType,
+                        include_hidden: bool,
                         selected: &Vec<PathBuf>) -> Context {
         let current_siblings =
             System::into_sorted_direntries(
-                collect_maybe_dir(&parent_path, None),
+                collect_maybe_dir(&parent_path, None, include_hidden),
                 paint_settings, sorting_type,
                 selected, Some(&parent_path));
         let parent_siblings =
             System::into_sorted_direntries(
-               collect_siblings_of(&parent_path),
+               collect_siblings_of(&parent_path, include_hidden),
                paint_settings, sorting_type, selected,
                System::maybe_parent(&parent_path).as_ref());
         let first_entry_path = System::path_of_nth_entry_inside(0, &parent_path, &current_siblings);
@@ -170,7 +175,7 @@ impl System {
         let column_width = (end - begin) as usize;
         let right_column =
             System::collect_right_column(
-                &first_entry_path, paint_settings, sorting_type,
+                &first_entry_path, paint_settings, sorting_type, include_hidden,
                 display_settings.column_effective_height, column_width, selected);
         let parent_siblings_shift =
             System::siblings_shift_for(
@@ -238,19 +243,23 @@ impl System {
         let (begin, end) = self.display_settings.columns_coord[column_index];
         let column_width = (end - begin) as usize;
         let current_path = &self.context_ref().current_path;
-        System::collect_right_column(current_path, &self.settings.paint_settings, &self.sorting_type,
-                     self.display_settings.column_effective_height, column_width, &self.selected)
+        System::collect_right_column(current_path, &self.settings.paint_settings,
+                                     &self.sorting_type, self.show_hidden,
+                                     self.display_settings.column_effective_height,
+                                     column_width, &self.selected)
     }
 
     fn collect_right_column(path_opt: &Option<PathBuf>,
-            paint_settings: &PaintSettings, sorting_type: &SortingType,
-            max_height: usize, max_width: usize,
-            selected: &Vec<PathBuf>) -> RightColumn {
+                            paint_settings: &PaintSettings,
+                            sorting_type: &SortingType,
+                            include_hidden: bool,
+                            max_height: usize, max_width: usize,
+                            selected: &Vec<PathBuf>) -> RightColumn {
         if let Some(path) = path_opt {
             if path.is_dir() { // resolved path
                 return RightColumn::with_siblings(
                     System::into_sorted_direntries(
-                        collect_maybe_dir(&path, Some(max_height)),
+                        collect_maybe_dir(&path, Some(max_height), include_hidden),
                         paint_settings, sorting_type, selected, Some(&path)));
             } else { // resolved path is a regular file
                 let path = maybe_resolve_symlink_recursively(path);
@@ -494,6 +503,11 @@ impl System {
         if self.inside_empty_dir() { return }
         let size = cumulative_size(self.context_ref().current_path.as_ref().unwrap());
         self.context_mut().cumulative_size_text = Some("Size: ".to_string() + &System::human_size(size));
+    }
+
+    pub fn toggle_hidden(&mut self) {
+        self.show_hidden = !self.show_hidden;
+        self.update();
     }
 //-----------------------------------------------------------------------------
     fn maybe_sync_search_backup_selection_for_current_siblings(&mut self) {
@@ -903,9 +917,8 @@ impl System {
 //-----------------------------------------------------------------------------
     // Update all, affectively reloading everything
     fn update(&mut self) {
-        if self.context_ref().current_path.is_none() { return; }
-        let current_path = self.context_ref().current_path.as_ref().unwrap().clone();
-        self.current_tab_mut().context = self.generate_context_for(current_path);
+        let parent_path = self.context_ref().parent_path.clone();
+        self.current_tab_mut().context = self.generate_context_for(parent_path);
         self.update_current_tab_name();
     }
 
@@ -991,8 +1004,10 @@ impl System {
         if self.transfers.is_empty() { System::set_drawing_delay(DrawingDelay::Regular); }
     }
 //-----------------------------------------------------------------------------
-    fn into_direntries(entries: Vec<Entry>, paint_settings: &PaintSettings,
-            selected: &Vec<PathBuf>, parent_path: Option<&PathBuf>) -> Vec<DirEntry> {
+    fn into_direntries(entries: Vec<Entry>,
+                       paint_settings: &PaintSettings,
+                       selected: &Vec<PathBuf>,
+                       parent_path: Option<&PathBuf>) -> Vec<DirEntry> {
         entries.into_iter().map(|entry| {
             let is_selected = System::is_selected(selected, &entry.name, parent_path);
             DirEntry::from_entry(entry, paint_settings, is_selected)
@@ -1023,14 +1038,14 @@ impl System {
     fn collect_sorted_siblings_of_parent(&self) -> Vec<DirEntry> {
         let grandparent = System::maybe_parent(&self.context_ref().parent_path);
         System::into_sorted_direntries(
-            collect_siblings_of(&self.context_ref().parent_path),
+            collect_siblings_of(&self.context_ref().parent_path, self.show_hidden),
             &self.settings.paint_settings, &self.sorting_type,
             &self.selected, grandparent.as_ref())
     }
 
     fn collect_sorted_children_of_parent(&self) -> Vec<DirEntry> {
         System::into_sorted_direntries(
-            collect_maybe_dir(&self.context_ref().parent_path, None),
+            collect_maybe_dir(&self.context_ref().parent_path, None, self.show_hidden),
             &self.settings.paint_settings, &self.sorting_type,
             &self.selected, Some(&self.context_ref().parent_path)) // TODO: CHECK
     }
@@ -1177,8 +1192,7 @@ impl System {
     }
 
     pub fn goto(&mut self, path: &str) {
-        self.context_mut().current_path = Some(PathBuf::from(path));
-        self.context_mut().cumulative_size_text = None;
+        self.context_mut().parent_path = PathBuf::from(path);
         self.update();
     }
 
