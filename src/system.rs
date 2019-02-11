@@ -1334,8 +1334,6 @@ impl System {
         self.draw_middle_column(&mut cs);
         self.draw_right_column(&mut cs);
 
-        self.draw_current_path(&mut cs);
-
         let mut bottom_bar = Bar::with_y_and_width(
             self.display_settings.height - 1, self.display_settings.width);
         self.maybe_draw_input_mode(&mut cs, &mut bottom_bar);
@@ -1348,6 +1346,7 @@ impl System {
         self.maybe_draw_selection_warning(&mut cs, &mut bottom_bar);
 
         let mut top_bar = Bar::with_y_and_width(0, self.display_settings.width);
+        self.draw_current_path(&mut cs, &mut top_bar);
         self.draw_tabs(&mut cs, &mut top_bar);
 
         self.maybe_draw_input_mode_cursor();
@@ -1421,14 +1420,14 @@ impl System {
         } // display nothing otherwise
     }
 
-    fn draw_current_path(&self, cs: &mut ColorSystem) {
+    fn draw_current_path(&self, cs: &mut ColorSystem, bar: &mut Bar) {
         cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
         if self.inside_empty_dir() {
             let text = path_to_string(&self.context_ref().parent_path) + "/<?>";
-            mvprintw(&self.window, 0, 0, &text);
+            bar.draw_left(&self.window, &text, 2);
         } else {
             let path = self.context_ref().current_path.as_ref().unwrap().to_str().unwrap();
-            mvprintw(&self.window, 0, 0, path);
+            bar.draw_left(&self.window, path, 2);
         }
     }
 
@@ -1766,6 +1765,7 @@ impl System {
 
 impl Drop for System {
     fn drop(&mut self) {
+        // ColorSystem::finalize(&self.window);
         endwin();
         println!("Done");
     }

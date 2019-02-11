@@ -98,6 +98,12 @@ impl ColorSystem {
         }
     }
 
+    // pub fn finalize(window: &Window) {
+    //     const ID: u8 = 1; // don't care about id since presumably not gonna be using them anymore
+    //     init_pair(ID as i16, -1, -1);
+    //     window.attron(ColorPair(ID));
+    // }
+
     pub fn set_paint(&mut self, window: &Window, paint: Paint) {
         let paint_id = self.get_maybe_add_paint(paint);
         window.attron(ColorPair(paint_id as u8));
@@ -119,7 +125,7 @@ impl ColorSystem {
             Attr::Underlined => A_UNDERLINE,
         };
         match mode {
-            Mode::On =>  window.attron(attr),
+            Mode::On  =>  window.attron(attr),
             Mode::Off => window.attroff(attr),
         };
     }
