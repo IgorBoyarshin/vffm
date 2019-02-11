@@ -768,6 +768,7 @@ impl System {
         } else {
             self.current_tab_index += 1;
         }
+        if self.tabs.len() > 1 { self.update_current(); }
     }
 
     pub fn previous_tab(&mut self) {
@@ -776,6 +777,7 @@ impl System {
         } else {
             self.current_tab_index -= 1;
         }
+        if self.tabs.len() > 1 { self.update_current(); }
     }
 //-----------------------------------------------------------------------------
     pub fn sort_with(&mut self, new_sorting_type: SortingType) {
