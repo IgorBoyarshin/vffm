@@ -1,17 +1,18 @@
-use pancurses::{Window, initscr, start_color, use_default_colors, noecho, half_delay, endwin, curs_set, nocbreak,
+use pancurses::{Window, initscr, start_color, use_default_colors, noecho,
+    half_delay, endwin, curs_set, nocbreak,
     ACS_CKBOARD, ACS_VLINE, ACS_HLINE, ACS_TTEE, ACS_BTEE,
     ACS_LLCORNER, ACS_LRCORNER, ACS_ULCORNER, ACS_URCORNER};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashSet};
+// use std::collections::{HashMap};
 use std::ops::RangeBounds;
-use std::ffi::OsStr;
-use std::process::Child;
 use std::time::SystemTime;
 
 use crate::coloring::*;
 use crate::filesystem::*;
 use crate::input::*;
+mod spawn;
+use spawn::*;
 
 
 //-----------------------------------------------------------------------------
@@ -130,7 +131,7 @@ impl System {
             display_settings,
 
             sorting_type,
-            spawn_patterns: System::generate_spawn_patterns(),
+            spawn_patterns: spawn::generate_spawn_patterns(),
 
             notification: None,      // for Transfers
 
@@ -283,107 +284,15 @@ impl System {
     }
 
     fn is_previewable(file_name: &str) -> bool {
-        for exact_name in System::text_exact_names() {
+        for exact_name in spawn::text_exact_names() {
             if file_name == exact_name { return true; }
         }
-        for ext in System::text_extensions() {
+        for ext in spawn::text_extensions() {
             if file_name.ends_with(ext) { return true; }
         }
         false
     }
 
-    fn text_extensions() -> Vec<&'static str> {
-        vec!["txt", "cpp", "h", "rs", "lock", "toml", "zsh", "java", "py",
-            "sh", "md", "log", "yml", "tex", "nb", "js", "ts", "html", "css", "json"]
-    }
-
-    fn text_exact_names() -> Vec<&'static str> {
-        vec!["Makefile", ".gitignore"]
-    }
-
-    fn generate_spawn_patterns() -> Vec<SpawnPattern> {
-        let add_to_apps = |apps: &mut HashMap<String, (Vec<String>, bool)>,
-                app: &str, spawn_files: Vec<&'static str>, is_external: bool| {
-            let mut vec = Vec::new();
-            for spawn_file in spawn_files {
-                vec.push(spawn_file.to_string());
-            }
-            apps.insert(app.to_string(), (vec, is_external));
-        };
-
-        let mut apps_extensions  = HashMap::new();
-        let mut apps_exact_names = HashMap::new();
-        let external = true; // for convenience and readability
-        let not_external = !external;
-
-        add_to_apps(&mut apps_extensions, "vim @", System::text_extensions(), not_external);
-        add_to_apps(&mut apps_exact_names, "vim @", System::text_exact_names(), not_external);
-        add_to_apps(&mut apps_extensions, "vlc @", vec!["mkv", "avi", "mp4", "mp3", "m4b"], external);
-        add_to_apps(&mut apps_extensions, "zathura @", vec!["pdf", "djvu"], external);
-        add_to_apps(&mut apps_extensions, "rifle_sxiv @", vec!["jpg", "jpeg", "png"], external);
-
-        let mut patterns: Vec<SpawnPattern> = Vec::new();
-        for (app, (extensions, is_external)) in apps_extensions.into_iter() {
-            for ext in extensions {
-                patterns.push(SpawnPattern::new_ext(&ext, &app, is_external));
-            }
-        }
-        for (app, (names, is_external)) in apps_exact_names.into_iter() {
-            for name in names {
-                patterns.push(SpawnPattern::new_exact(&name, &app, is_external));
-            }
-        }
-
-        patterns
-    }
-
-    fn spawn_rule_for(&self, full_path: &PathBuf) -> Option<(String, Vec<String>, bool)> {
-        let file_name = full_path.file_name().unwrap().to_str().unwrap();
-        let full_path = full_path.to_str().unwrap();
-        for SpawnPattern { file, rule } in self.spawn_patterns.iter() {
-            match file {
-                SpawnFile::Extension(ext) => if file_name.to_ascii_lowercase()
-                                                    .ends_with(ext.as_str()) {
-                    return Some(rule.generate(full_path));
-                },
-                SpawnFile::ExactName(name) => if file_name == name {
-                    return Some(rule.generate(full_path));
-                }
-            }
-        }
-        None
-    }
-
-    fn execute_command_from(path: &PathBuf, command: &str) {
-        let (app, args) = System::split_into_app_and_args(command);
-        Command::new(app).args(args)
-            .stderr(Stdio::null()).stdout(Stdio::piped())
-            .current_dir(path)
-            .spawn().expect("failed to execute process");
-    }
-
-    fn spawn_process_async<S: AsRef<OsStr>>(app: &str, args: Vec<S>) -> Child {
-        Command::new(app).args(args)
-            .stderr(Stdio::null()).stdout(Stdio::piped())
-            .spawn().expect("failed to execute process")
-    }
-
-    fn spawn_process_wait<S: AsRef<OsStr>>(app: &str, args: Vec<S>) {
-        Command::new(app).args(args)
-            .stderr(Stdio::null()).stdout(Stdio::null())
-            .status().expect("failed to execute process");
-    }
-
-    fn spawn_program<S: AsRef<OsStr>>(app: &str, args: Vec<S>, is_external: bool) {
-        if is_external {
-            Command::new(app).args(args)
-                .stderr(Stdio::null()).stdout(Stdio::null())
-                .spawn().expect("failed to execute process");
-        } else {
-            Command::new(app).args(args)
-                .status().expect("failed to execute process");
-        }
-    }
 //-----------------------------------------------------------------------------
     fn current_contains(&self, name: &str) -> bool {
         for entry in self.context_ref().current_siblings.iter() {
@@ -393,11 +302,13 @@ impl System {
     }
 
     fn cut(src: &str, dst: &str) {
-        System::spawn_process_async("mv", vec![src, dst]);
+        spawn::spawn_process_async("mv", vec![src, dst]);
     }
 
     fn yank(src: &str, dst: &str) {
-        System::spawn_process_async("cp", vec!["-a", src, dst]);
+        spawn::spawn_process_async("cp", vec!["-a", src, dst]);
+        // Don't use rsync because it generates modified target names which makes
+        // it impossible to track target's size until the transfer has finished.
         // System::spawn_process_async("rsync", vec!["-a", "-v", "-h", src, dst]);
     }
 
@@ -467,36 +378,17 @@ impl System {
 
     fn remove(path: &PathBuf) {
         if path.is_dir() {
-            System::spawn_process_wait("rm", vec!["-r", "-f", path_to_str(path)]);
+            spawn::spawn_process_wait("rm", vec!["-r", "-f", path_to_str(path)]);
         } else if path.is_file() {
-            System::spawn_process_wait("rm", vec!["-f", path_to_str(path)]);
+            spawn::spawn_process_wait("rm", vec!["-f", path_to_str(path)]);
         } else { // is symlink
-            System::spawn_process_wait("unlink", vec![path_to_str(path)]);
+            spawn::spawn_process_wait("unlink", vec![path_to_str(path)]);
         }
     }
 
     fn rename(path: &PathBuf, new_name: &str) {
         let new_path = path.parent().unwrap().join(new_name);
-        System::spawn_process_wait("mv", vec![path_to_str(path), path_to_str(&new_path)]);
-    }
-
-    fn split_into_app_and_args(text: &str) -> (&str, Vec<String>) {
-        let mut parts = text.split_whitespace();
-        let app = parts.next().unwrap();
-        let mut args = Vec::new();
-        for part in parts {
-            if part.starts_with("-") && !part.starts_with("--") {
-                // Assume valid format like -fLaG
-                for c in part.chars().skip(1) {
-                    let mut arg = "-".to_string();
-                    arg.push(c);
-                    args.push(arg);
-                }
-            } else {
-                args.push(part.to_string());
-            }
-        }
-        (app, args)
+        spawn::spawn_process_wait("mv", vec![path_to_str(path), path_to_str(&new_path)]);
     }
 
     pub fn get_cumulative_size(&mut self) {
@@ -609,7 +501,7 @@ impl System {
             self.context_mut().input_mode = None;
         } else if let Some(InputMode::Command(CommandTools {text, ..})) =
                 self.context_ref().input_mode.as_ref() {
-            System::execute_command_from(&self.context_ref().parent_path, text);
+            spawn::execute_command_from(&self.context_ref().parent_path, text);
             // Don't update because the process is async and probably
             // hasn't finished yet => no use updating.
             // self.update_current();
@@ -1183,8 +1075,8 @@ impl System {
         } else { // Resolved path points to a file
             // Try to open with default app
             let path = maybe_resolve_symlink_recursively(&current_path);
-            if let Some((app, args, is_external)) = self.spawn_rule_for(&path) {
-                System::spawn_program(&app, args, is_external);
+            if let Some((app, args, is_external)) = spawn_rule_for(&path, &self.spawn_patterns) {
+                spawn::spawn_program(&app, args, is_external);
                 self.update_current();
                 self.window.clear(); // Otherwise the screen is not restored correctly. Need to invalidate
             }
@@ -1257,19 +1149,9 @@ impl System {
         }
     }
 //-----------------------------------------------------------------------------
-    fn maybe_index_of_selected(path: &PathBuf, selected: &Vec<PathBuf>) -> Option<usize> {
-        selected.iter().enumerate()
-            .find(|(_, item)| *item == path)
-            .map(|(index, _)| index)
-    }
-
-    fn maybe_index_of_self_selected(&self, path: &PathBuf) -> Option<usize> {
-        System::maybe_index_of_selected(path, &self.selected)
-    }
-
     pub fn select_under_cursor(&mut self) {
         if let Some(path) = self.context_ref().current_path.as_ref() {
-            if let Some(index) = self.maybe_index_of_self_selected(path) {
+            if let Some(index) = self.selected.iter().position(|item| item == path) {
                 // Unselect
                 self.selected.remove(index);
                 assert!(self.unsafe_current_entry_mut().is_selected);
@@ -1800,52 +1682,6 @@ fn millis_since(time: SystemTime) -> Millis {
     let elapsed = SystemTime::now().duration_since(time);
     if elapsed.is_err() { return 0; } // _now_ is earlier than _time_ => assume 0
     elapsed.unwrap().as_millis()
-}
-//-----------------------------------------------------------------------------
-#[derive(Clone)]
-struct SpawnRule {
-    rule: String,
-    is_external: bool,
-}
-
-impl SpawnRule {
-    fn generate(&self, file_name: &str) -> (String, Vec<String>, bool) {
-        let placeholder = "@";
-        let mut args = Vec::new();
-        let mut parts = self.rule.split_whitespace();
-        let app = parts.next().unwrap();
-        for arg in parts { // the rest
-            if arg == placeholder { args.push(file_name.to_string()); }
-            else                  { args.push(arg.to_string()); }
-        }
-        (app.to_string(), args, self.is_external)
-    }
-}
-
-enum SpawnFile {
-    Extension(String),
-    ExactName(String),
-}
-
-struct SpawnPattern {
-    file: SpawnFile,
-    rule: SpawnRule,
-}
-
-impl SpawnPattern {
-    fn new_ext(ext: &str, rule: &str, is_external: bool) -> SpawnPattern {
-        SpawnPattern {
-            file: SpawnFile::Extension(ext.to_string()),
-            rule: SpawnRule{ rule: rule.to_string(), is_external },
-        }
-    }
-
-    fn new_exact(name: &str, rule: &str, is_external: bool) -> SpawnPattern {
-        SpawnPattern {
-            file: SpawnFile::ExactName(name.to_string()),
-            rule: SpawnRule{ rule: rule.to_string(), is_external },
-        }
-    }
 }
 //-----------------------------------------------------------------------------
 #[derive(Clone)]
