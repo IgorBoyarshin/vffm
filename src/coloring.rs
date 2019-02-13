@@ -1,11 +1,52 @@
 use std::collections::HashMap;
 use pancurses::*;
+use crate::filesystem::*;
 
 
 type ColorComponent = i16;
 type RGB = (ColorComponent, ColorComponent, ColorComponent);
 type ColorId = i16;
 type PaintId = i16;
+
+pub struct PaintSettings {
+    pub dir_paint: Paint,
+    pub symlink_paint: Paint,
+    pub file_paint: Paint,
+    pub unknown_paint: Paint,
+}
+
+pub fn paint_for(entrytype: &EntryType, name: &str,
+        executable: bool, paint_settings: &PaintSettings) -> Paint {
+    match entrytype {
+        EntryType::Directory => paint_settings.dir_paint,
+        EntryType::Symlink   => paint_settings.symlink_paint,
+        EntryType::Unknown   => paint_settings.unknown_paint,
+        EntryType::Regular   =>
+            if let Some(paint) = maybe_paint_by_name(name) { paint }
+            else if executable { Paint::with_fg_bg(Color::Green, Color::Default).bold() }
+            else { paint_settings.file_paint },
+    }
+}
+
+fn maybe_paint_by_name(name: &str) -> Option<Paint> {
+    if      name.ends_with(".cpp")  { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
+    else if name.ends_with(".java") { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
+    else if name.ends_with(".rs")   { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
+    else if name.ends_with(".h")    { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
+    else if name.ends_with(".pdf")  { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
+    else if name.ends_with(".djvu") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
+    else if name.ends_with(".mp3")  { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)       ) }
+    else if name.ends_with(".webm") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)       ) }
+    else if name.ends_with(".png")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
+    else if name.ends_with(".gif")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
+    else if name.ends_with(".jpg")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
+    else if name.ends_with(".jpeg") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
+    else if name.ends_with(".mkv")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
+    else if name.ends_with(".avi")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
+    else if name.ends_with(".mp4")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
+    None
+}
+
 
 
 pub enum Attr {

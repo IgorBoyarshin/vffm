@@ -1,46 +1,22 @@
 use pancurses::{Window, initscr, start_color, use_default_colors, noecho,
-    half_delay, endwin, curs_set, nocbreak,
-    ACS_CKBOARD, ACS_VLINE, ACS_HLINE, ACS_TTEE, ACS_BTEE,
-    ACS_LLCORNER, ACS_LRCORNER, ACS_ULCORNER, ACS_URCORNER};
+    half_delay, endwin, curs_set, nocbreak};
 use std::path::PathBuf;
 use std::collections::{HashSet};
 // use std::collections::{HashMap};
-use std::ops::RangeBounds;
-use std::time::SystemTime;
 
 use crate::coloring::*;
+use crate::right_column::*;
 use crate::filesystem::*;
 use crate::input::*;
-mod spawn;
-use spawn::*;
+use crate::input_mode::*;
+use crate::direntry::*;
+use crate::spawn::*;
+use crate::drawing::*;
+use crate::context::*;
+use crate::tab::*;
 
 
 //-----------------------------------------------------------------------------
-#[derive(Clone)]
-enum InputMode {
-    Search(SearchTools),
-    ChangeName(ChangeNameTools),
-    Command(CommandTools),
-}
-
-#[derive(Clone)]
-struct SearchTools {
-    query: String,
-    cursor_index: Option<usize>, // None if not if focus
-    current_siblings_backup: Vec<DirEntry>,
-}
-
-#[derive(Clone)]
-struct ChangeNameTools {
-    new_name: String,
-    cursor_index: usize,
-}
-
-#[derive(Clone)]
-struct CommandTools {
-    text: String,
-    cursor_index: usize,
-}
 
 pub struct Settings {
     pub paint_settings: PaintSettings,
@@ -52,49 +28,11 @@ pub struct Settings {
     pub copy_done_notification_delay_ms: Millis,
 }
 
-pub struct PaintSettings {
-    pub dir_paint: Paint,
-    pub symlink_paint: Paint,
-    pub file_paint: Paint,
-    pub unknown_paint: Paint,
-}
-
-struct DisplaySettings {
-    height: Coord,
-    width:  Coord,
-    columns_coord: Vec<(Coord, Coord)>,
-
-    scrolling_gap: usize, // const
-    column_effective_height: usize, // const
-    entries_display_begin: Coord, // const
-}
-
-#[derive(Clone)]
-struct Context {
-    current_siblings: Vec<DirEntry>,
-    parent_siblings: Vec<DirEntry>,
-    right_column: RightColumn, // depends on display_settings
-
-    current_path: Option<PathBuf>,
-    parent_path: PathBuf,
-
-    parent_index: usize,
-    current_index: usize,
-
-    parent_siblings_shift: usize, // depends on display_settings
-    current_siblings_shift: usize, // depends on display_settings
-
-    current_permissions: String,
-    additional_entry_info: Option<String>,
-    cumulative_size_text: Option<String>,
-
-    input_mode: Option<InputMode>,
-}
 //-----------------------------------------------------------------------------
 pub struct System {
-    window: Window,
+    // window: Window,
     settings: Settings,
-    display_settings: DisplaySettings,
+    renderer: Renderer,
 
     sorting_type: SortingType,
     spawn_patterns: Vec<SpawnPattern>, // const
@@ -120,18 +58,20 @@ impl System {
         let show_hidden = true; // TODO: move into Settings
         let selected = Vec::new();
         let sorting_type = SortingType::Lexicographically;
-        let display_settings = System::generate_display_settings(
+        let display_settings = DisplaySettings::generate(
             &window, settings.scrolling_gap, &settings.columns_ratio);
-        let context = System::generate_context(starting_path, &display_settings,
-                               &settings.paint_settings, &sorting_type, show_hidden, &selected);
+        let context = Context::generate(starting_path, &display_settings,
+                               &settings.paint_settings, &sorting_type,
+                               show_hidden, &selected);
 
         System {
-            window,
+            // window,
             settings,
-            display_settings,
+            renderer: Renderer::new(window, display_settings),
+            // display_settings,
 
             sorting_type,
-            spawn_patterns: spawn::generate_spawn_patterns(),
+            spawn_patterns: generate_spawn_patterns(),
 
             notification: None,      // for Transfers
 
@@ -140,158 +80,31 @@ impl System {
 
             selected,
 
-            tabs: vec![Tab { name: System::tab_name_from_path(&context.parent_path), context }],
+            tabs: vec![Tab { name: tab_name_from_path(&context.parent_path), context }],
             current_tab_index: 0,
             show_hidden,
         }
     }
 //-----------------------------------------------------------------------------
     fn generate_context_for(&mut self, parent_path: PathBuf) -> Context {
-        System::generate_context(parent_path, &self.display_settings,
+        Context::generate(parent_path, &self.renderer.display_settings,
             &self.settings.paint_settings, &self.sorting_type, self.show_hidden, &self.selected)
     }
 
-    fn generate_context(parent_path: PathBuf,
-                        display_settings: &DisplaySettings,
-                        paint_settings: &PaintSettings,
-                        sorting_type: &SortingType,
-                        include_hidden: bool,
-                        selected: &Vec<PathBuf>) -> Context {
-        let current_siblings =
-            System::into_sorted_direntries(
-                collect_maybe_dir(&parent_path, None, include_hidden),
-                paint_settings, sorting_type,
-                selected, Some(&parent_path));
-        let parent_siblings =
-            System::into_sorted_direntries(
-               collect_siblings_of(&parent_path, include_hidden),
-               paint_settings, sorting_type, selected,
-               System::maybe_parent(&parent_path).as_ref());
-        let first_entry_path = System::path_of_nth_entry_inside(0, &parent_path, &current_siblings);
-        let first_entry_ref = System::nth_entry_inside(0, &current_siblings);
-        let parent_index = System::index_of_entry_inside(&parent_path, &parent_siblings).unwrap();
-        let current_index = 0;
-        let column_index = 2;
-        let (begin, end) = display_settings.columns_coord[column_index];
-        let column_width = (end - begin) as usize;
-        let right_column =
-            System::collect_right_column(
-                &first_entry_path, paint_settings, sorting_type, include_hidden,
-                display_settings.column_effective_height, column_width, selected);
-        let parent_siblings_shift =
-            System::siblings_shift_for(
-                display_settings.scrolling_gap,
-                display_settings.column_effective_height,
-                parent_index, parent_siblings.len(), None);
-        let current_siblings_shift =
-            System::siblings_shift_for(
-                display_settings.scrolling_gap,
-                display_settings.column_effective_height,
-                current_index, current_siblings.len(), None);
-        Context {
-            parent_index,
-            current_index,
-            parent_siblings,
-            current_permissions: System::string_permissions_for_entry(&first_entry_ref),
-            additional_entry_info: System::get_additional_entry_info(first_entry_ref, &first_entry_path),
-            current_siblings,
-            right_column,
-            current_path: first_entry_path,
-            parent_path,
-
-            parent_siblings_shift,
-            current_siblings_shift,
-            cumulative_size_text: None, // for CumulativeSize
-
-            input_mode: None,
-        }
-    }
-
-    fn generate_display_settings(
-            window: &Window, scrolling_gap: usize, columns_ratio: &Vec<u32>)
-            -> DisplaySettings {
-        let (height, width) = System::get_height_width(window);
-        let column_effective_height = height as usize - 4; // gap+border+border+gap
-        let scrolling_gap = System::resize_scrolling_gap_until_fits(
-            scrolling_gap, column_effective_height);
-        let columns_coord = System::positions_from_ratio(columns_ratio, width);
-        DisplaySettings {
-            height,
-            width,
-            columns_coord,
-            scrolling_gap,
-            column_effective_height,
-            entries_display_begin: 2, // gap + border
-        }
-    }
 //-----------------------------------------------------------------------------
-    fn index_of_entry_inside(path: &PathBuf, entries: &Vec<DirEntry>) -> Option<usize> {
-        if is_root(path) { return Some(0); }
-        let sought_name = path.file_name().unwrap().to_str().unwrap();
-        for (index, DirEntry {name, ..}) in entries.iter().enumerate() {
-            if sought_name == name { return Some(index); }
-        }
-        None
-    }
-
-    fn resize_scrolling_gap_until_fits(mut gap: usize, column_effective_height: usize) -> usize {
-        while 2 * gap >= column_effective_height { gap -= 1; } // gap too large
-        gap
-    }
 //-----------------------------------------------------------------------------
     fn collect_right_column_of_current(&self) -> RightColumn {
         let column_index = 2;
-        let (begin, end) = self.display_settings.columns_coord[column_index];
+        let (begin, end) = self.renderer.display_settings.columns_coord[column_index];
         let column_width = (end - begin) as usize;
         let current_path = &self.context_ref().current_path;
-        System::collect_right_column(current_path, &self.settings.paint_settings,
-                                     &self.sorting_type, self.show_hidden,
-                                     self.display_settings.column_effective_height,
-                                     column_width, &self.selected)
+        RightColumn::collect(current_path, &self.settings.paint_settings,
+                             &self.sorting_type, self.show_hidden,
+                             self.renderer.display_settings.column_effective_height,
+                             column_width, &self.selected)
     }
 
-    fn collect_right_column(path_opt: &Option<PathBuf>,
-                            paint_settings: &PaintSettings,
-                            sorting_type: &SortingType,
-                            include_hidden: bool,
-                            max_height: usize, max_width: usize,
-                            selected: &Vec<PathBuf>) -> RightColumn {
-        if let Some(path) = path_opt {
-            if path.is_dir() { // resolved path
-                return RightColumn::with_siblings(
-                    System::into_sorted_direntries(
-                        collect_maybe_dir(&path, Some(max_height), include_hidden),
-                        paint_settings, sorting_type, selected, Some(&path)));
-            } else { // resolved path is a regular file
-                let path = maybe_resolve_symlink_recursively(path);
-                if let Some(preview) = System::read_preview_of(&path, max_height) {
-                    let truncated_preview: Vec<String> = preview.into_iter()
-                        .map(|line| System::maybe_truncate(line.trim_end(), max_width))
-                        .collect();
-                    return RightColumn::with_preview(truncated_preview);
-                }
-            }
-        }
-        RightColumn::empty()
-    }
 //-----------------------------------------------------------------------------
-    fn read_preview_of(path: &PathBuf, max_height: usize) -> Option<Vec<String>> {
-        let file_name = path.file_name().unwrap().to_str().unwrap();
-        if System::is_previewable(file_name) {
-            let max_per_line = 100;
-            Some(read_lines(path, max_height, max_height as u64 * max_per_line))
-        } else { None }
-    }
-
-    fn is_previewable(file_name: &str) -> bool {
-        for exact_name in spawn::text_exact_names() {
-            if file_name == exact_name { return true; }
-        }
-        for ext in spawn::text_extensions() {
-            if file_name.ends_with(ext) { return true; }
-        }
-        false
-    }
 
 //-----------------------------------------------------------------------------
     fn current_contains(&self, name: &str) -> bool {
@@ -302,11 +115,11 @@ impl System {
     }
 
     fn cut(src: &str, dst: &str) {
-        spawn::spawn_process_async("mv", vec![src, dst]);
+        spawn_process_async("mv", vec![src, dst]);
     }
 
     fn yank(src: &str, dst: &str) {
-        spawn::spawn_process_async("cp", vec!["-a", src, dst]);
+        spawn_process_async("cp", vec!["-a", src, dst]);
         // Don't use rsync because it generates modified target names which makes
         // it impossible to track target's size until the transfer has finished.
         // System::spawn_process_async("rsync", vec!["-a", "-v", "-h", src, dst]);
@@ -378,23 +191,23 @@ impl System {
 
     fn remove(path: &PathBuf) {
         if path.is_dir() {
-            spawn::spawn_process_wait("rm", vec!["-r", "-f", path_to_str(path)]);
+            spawn_process_wait("rm", vec!["-r", "-f", path_to_str(path)]);
         } else if path.is_file() {
-            spawn::spawn_process_wait("rm", vec!["-f", path_to_str(path)]);
+            spawn_process_wait("rm", vec!["-f", path_to_str(path)]);
         } else { // is symlink
-            spawn::spawn_process_wait("unlink", vec![path_to_str(path)]);
+            spawn_process_wait("unlink", vec![path_to_str(path)]);
         }
     }
 
     fn rename(path: &PathBuf, new_name: &str) {
         let new_path = path.parent().unwrap().join(new_name);
-        spawn::spawn_process_wait("mv", vec![path_to_str(path), path_to_str(&new_path)]);
+        spawn_process_wait("mv", vec![path_to_str(path), path_to_str(&new_path)]);
     }
 
     pub fn get_cumulative_size(&mut self) {
         if self.inside_empty_dir() { return }
         let size = cumulative_size(self.context_ref().current_path.as_ref().unwrap());
-        self.context_mut().cumulative_size_text = Some("Size: ".to_string() + &System::human_size(size));
+        self.context_mut().cumulative_size_text = Some("Size: ".to_string() + &human_size(size));
     }
 
     pub fn toggle_hidden(&mut self) {
@@ -501,7 +314,7 @@ impl System {
             self.context_mut().input_mode = None;
         } else if let Some(InputMode::Command(CommandTools {text, ..})) =
                 self.context_ref().input_mode.as_ref() {
-            spawn::execute_command_from(&self.context_ref().parent_path, text);
+            execute_command_from(&self.context_ref().parent_path, text);
             // Don't update because the process is async and probably
             // hasn't finished yet => no use updating.
             // self.update_current();
@@ -640,12 +453,7 @@ impl System {
 //-----------------------------------------------------------------------------
     fn update_current_tab_name(&mut self) {
         let parent_path = &self.context_ref().parent_path;
-        self.current_tab_mut().name = System::tab_name_from_path(parent_path);
-    }
-
-    fn tab_name_from_path(path: &PathBuf) -> String {
-        if path == &PathBuf::from("/") { "/".to_string() }
-        else { osstr_to_str(path.file_name().unwrap()).to_string() }
+        self.current_tab_mut().name = tab_name_from_path(parent_path);
     }
 
     // Returns whether it was the last Tab (perhaps whether we should terminate)
@@ -691,60 +499,14 @@ impl System {
         self.update_current();
     }
 
-    fn sort(mut entries: Vec<DirEntry>, sorting_type: &SortingType) -> Vec<DirEntry> {
-        match sorting_type {
-            SortingType::Lexicographically => entries.sort_by(
-                |a, b| a.name.cmp(&b.name)),
-            SortingType::TimeModified => entries.sort_by(
-                |a, b| a.time_modified.cmp(&b.time_modified)),
-            SortingType::Any => {},
-        }
-        entries
-    }
 //-----------------------------------------------------------------------------
-    fn string_permissions_for_entry(entry: &Option<&DirEntry>) -> String {
-        if let Some(entry) = entry {
-            entry.permissions.string_representation()
-        } else { "".to_string() }
-    }
-
     fn get_current_permissions(&mut self) -> String {
-        System::string_permissions_for_entry(&self.current_entry_ref())
+        string_permissions_for_entry(&self.current_entry_ref())
     }
 
     fn get_additional_entry_info_for_current(&self) -> Option<String> {
         let context = self.context_ref();
-        System::get_additional_entry_info(self.current_entry_ref(), &context.current_path)
-    }
-
-    fn get_additional_entry_info(entry: Option<&DirEntry>, path: &Option<PathBuf>)
-            -> Option<String> {
-        if let Some(entry) = entry {
-            if entry.is_dir() { // get sub-entries count
-                // if let Some(siblings) = right_column.siblings_ref() {
-                //     let count = siblings.len().to_string();
-                //     let text = "Entries inside: ".to_string() + &count;
-                //     return Some(text);
-                // }
-            } else if entry.is_symlink() { // get the path the link points to
-                if let Some(result) = System::get_symlink_target(path) {
-                    let text = "-> ".to_string() + &result;
-                    return Some(text);
-                }
-            }
-        }
-        None
-    }
-
-    fn get_symlink_target(path: &Option<PathBuf>) -> Option<String> {
-        if let Some(path) = path {
-            if is_symlink(path) {
-                if let Some(resolved) = resolve_symlink(path) {
-                    return Some(path_to_str(&resolved).to_string());
-                }
-            }
-        }
-        None
+        get_additional_entry_info(self.current_entry_ref(), &context.current_path)
     }
 
     fn current_entry_ref(&self) -> Option<&DirEntry> {
@@ -792,20 +554,6 @@ impl System {
         self.context_ref().current_path.is_none()
     }
 
-    fn path_of_nth_entry_inside(n: usize, path: &PathBuf, entries: &Vec<DirEntry>) -> Option<PathBuf> {
-        if entries.is_empty() { return None; }
-        if n >= entries.len() { return None; }
-        let name = entries[n].name.clone();
-        let mut path = path.clone();
-        path.push(name);
-        Some(path)
-    }
-
-    fn nth_entry_inside(n: usize, entries: &Vec<DirEntry>) -> Option<&DirEntry> {
-        if entries.is_empty() { return None; }
-        if n >= entries.len() { return None; }
-        Some(entries.get(n).unwrap())
-    }
 //-----------------------------------------------------------------------------
     // Update all, affectively reloading everything
     fn update(&mut self) {
@@ -836,7 +584,7 @@ impl System {
             if self.context_ref().current_siblings.is_empty() { 0 } // reset for future
             else if self.context_ref().current_index >= len   { len - 1 } // update to valid
             else                                              { self.context_ref().current_index }; // leave old
-        self.context_mut().current_path = System::path_of_nth_entry_inside(
+        self.context_mut().current_path = path_of_nth_entry_inside(
             self.context_ref().current_index, &self.context_ref().parent_path,
             &self.context_ref().current_siblings);
         self.context_mut().right_column = self.collect_right_column_of_current();
@@ -896,94 +644,34 @@ impl System {
         if self.transfers.is_empty() { System::set_drawing_delay(DrawingDelay::Regular); }
     }
 //-----------------------------------------------------------------------------
-    fn into_direntries(entries: Vec<Entry>,
-                       paint_settings: &PaintSettings,
-                       selected: &Vec<PathBuf>,
-                       parent_path: Option<&PathBuf>) -> Vec<DirEntry> {
-        entries.into_iter().map(|entry| {
-            let is_selected = System::is_selected(selected, &entry.name, parent_path);
-            DirEntry::from_entry(entry, paint_settings, is_selected)
-        }).collect()
-    }
-
-    fn is_selected(selected: &Vec<PathBuf>, name: &str, parent_path: Option<&PathBuf>) -> bool {
-        if let Some(parent_path) = parent_path {
-            return selected.iter().any(|item| item.ends_with(name) // check partially
-                                && *item == parent_path.join(name)); // verify
-        } else { false }
-    }
-
-    fn maybe_parent(path: &PathBuf) -> Option<PathBuf> {
-        if path_to_str(path) == "/" { None }
-        else { Some(path.parent().unwrap().to_path_buf()) }
-    }
-
-    fn into_sorted_direntries(entries: Vec<Entry>,
-                              paint_settings: &PaintSettings,
-                              sorting_type: &SortingType,
-                              selected: &Vec<PathBuf>,
-                              parent_path: Option<&PathBuf>) -> Vec<DirEntry> {
-        let entries = System::into_direntries(entries, paint_settings, selected, parent_path);
-        System::sort(entries, sorting_type)
-    }
-
     fn collect_sorted_siblings_of_parent(&self) -> Vec<DirEntry> {
-        let grandparent = System::maybe_parent(&self.context_ref().parent_path);
-        System::into_sorted_direntries(
+        let grandparent = maybe_parent(&self.context_ref().parent_path);
+        into_sorted_direntries(
             collect_siblings_of(&self.context_ref().parent_path, self.show_hidden),
             &self.settings.paint_settings, &self.sorting_type,
             &self.selected, grandparent.as_ref())
     }
 
     fn collect_sorted_children_of_parent(&self) -> Vec<DirEntry> {
-        System::into_sorted_direntries(
+        into_sorted_direntries(
             collect_maybe_dir(&self.context_ref().parent_path, None, self.show_hidden),
             &self.settings.paint_settings, &self.sorting_type,
             &self.selected, Some(&self.context_ref().parent_path)) // TODO: CHECK
     }
 
-    // The display is guaranteed to be able to contain 2*gap (accomplished in settings)
-    fn siblings_shift_for(gap: usize, max: usize, index: usize,
-                              len: usize, old_shift: Option<usize>) -> usize {
-        let gap   = gap   as Coord;
-        let max   = max   as Coord;
-        let index = index as Coord;
-        let len   = len   as Coord;
-
-        if len <= max         { return 0; }
-        if index < gap        { return 0; }
-        if index >= len - gap { return (len - max) as usize; }
-
-        if let Some(old_shift) = old_shift {
-            let old_shift = old_shift as Coord;
-
-            let shift = index - gap;
-            if shift < old_shift { return shift as usize; }
-            let shift = index + 1 - max + gap;
-            if shift > old_shift { return shift as usize; }
-
-            old_shift as usize
-        } else { // no requirements => let at the top of the screen after the gap
-            let mut shift = index - gap;
-            let left_at_bottom = len - shift - max;
-            if left_at_bottom < 0 { shift += left_at_bottom; }
-            shift as usize
-        }
-    }
-
     fn recalculate_parent_siblings_shift(&mut self) -> usize {
-        System::siblings_shift_for(
-            self.display_settings.scrolling_gap,
-            self.display_settings.column_effective_height,
+        siblings_shift_for(
+            self.renderer.display_settings.scrolling_gap,
+            self.renderer.display_settings.column_effective_height,
             self.context_ref().parent_index,
             self.context_ref().parent_siblings.len(),
             None)
     }
 
     fn recalculate_current_siblings_shift(&mut self) -> usize {
-        System::siblings_shift_for(
-            self.display_settings.scrolling_gap,
-            self.display_settings.column_effective_height,
+        siblings_shift_for(
+            self.renderer.display_settings.scrolling_gap,
+            self.renderer.display_settings.column_effective_height,
             self.context_ref().current_index,
             self.context_ref().current_siblings.len(),
             Some(self.context_ref().current_siblings_shift))
@@ -1049,7 +737,7 @@ impl System {
             self.context_mut().current_index = self.context_ref().parent_index;
             self.common_left_right();
 
-            self.context_mut().parent_index = System::index_of_entry_inside(
+            self.context_mut().parent_index = index_of_entry_inside(
                 &self.context_ref().parent_path, &self.context_ref().parent_siblings).unwrap();
             self.context_mut().current_siblings_shift = self.context_ref().parent_siblings_shift;
             self.context_mut().parent_siblings_shift = self.recalculate_parent_siblings_shift();
@@ -1064,7 +752,7 @@ impl System {
             // Navigate inside
             // Deliberately use the not-resolved version, so the path contains the symlink
             self.context_mut().parent_path = current_path.to_path_buf();
-            self.context_mut().current_path = System::path_of_nth_entry_inside(
+            self.context_mut().current_path = path_of_nth_entry_inside(
                 0, &current_path, self.context_ref().right_column.siblings_ref().unwrap());
 
             self.context_mut().parent_index = self.context_ref().current_index;
@@ -1076,9 +764,9 @@ impl System {
             // Try to open with default app
             let path = maybe_resolve_symlink_recursively(&current_path);
             if let Some((app, args, is_external)) = spawn_rule_for(&path, &self.spawn_patterns) {
-                spawn::spawn_program(&app, args, is_external);
+                spawn_program(&app, args, is_external);
                 self.update_current();
-                self.window.clear(); // Otherwise the screen is not restored correctly. Need to invalidate
+                self.renderer.invalidate(); // Otherwise the screen is not restored correctly
             }
         }
     }
@@ -1100,53 +788,53 @@ impl System {
         self.update_current_entry_by_index();
     }
 //-----------------------------------------------------------------------------
-    fn list_entry(&self, cs: &mut ColorSystem, column_index: usize,
-            y: usize, entry: &DirEntry, under_cursor: bool, selected: bool) {
-        let paint = System::maybe_selected_paint_from(entry.paint, under_cursor);
+    pub fn draw(&mut self, mut cs: &mut ColorSystem) {
+        self.renderer.clear(&mut cs, self.settings.primary_paint);
 
-        let y = y as Coord + self.display_settings.entries_display_begin;
-        let (mut begin, end) = self.display_settings.columns_coord[column_index];
-        if selected {
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Red, Color::Default));
-            self.window.mvaddch(y, begin + 1, ACS_CKBOARD());
-            self.window.mvaddch(y, begin + 2, ' ');
-            // cs.set_paint(&self.window, Paint::with_fg_bg(Color::Yellow, Color::Default));
-            // self.window.mvaddch(y, begin + 2, ACS_CKBOARD());
-            begin += 2;
+        self.update_transfer_progress();
+
+        self.renderer.draw_borders(&mut cs, self.settings.primary_paint);
+        self.renderer.draw_left_column(&mut cs, &self.context_ref().parent_siblings,
+            self.context_ref().parent_index, self.context_ref().parent_siblings_shift);
+        self.renderer.draw_middle_column(&mut cs, self.inside_empty_dir(),
+            &self.context_ref().current_siblings,
+            self.context_ref().current_index,
+            self.context_ref().current_siblings_shift);
+        self.renderer.draw_right_column(&mut cs, &self.context_ref().right_column,
+            self.settings.preview_paint);
+
+        let mut bottom_bar = Bar::with_y_and_width(
+            self.renderer.display_settings.height - 1, self.renderer.display_settings.width);
+        self.renderer.maybe_draw_input_mode(&mut cs, &mut bottom_bar, &self.context_ref().input_mode);
+        self.renderer.draw_current_permission(&mut cs, &mut bottom_bar,
+                              &self.context_ref().current_permissions,
+                              self.inside_empty_dir());
+        self.renderer.draw_current_size(&mut cs, &mut bottom_bar,
+                                        self.current_entry_ref().map(|e| e.size));
+        self.renderer.maybe_draw_additional_info_for_current(&mut cs, &mut bottom_bar,
+                                             &self.context_ref().additional_entry_info);
+        self.renderer.draw_current_dir_siblings_count(&mut cs, &mut bottom_bar,
+                                                  &self.context_ref().current_siblings);
+        self.renderer.draw_cumulative_size_text(&mut cs, &mut bottom_bar,
+                                    &self.context_ref().cumulative_size_text);
+        if self.renderer.update_and_draw_notification(&mut cs, &mut bottom_bar, &self.notification) {
+            self.notification = None;
         }
-        let column_width = end - begin;
-        let size = System::human_size(entry.size);
-        let size_len = size.len();
-        let name_len = System::chars_amount(&entry.name) as Coord;
-        let empty_space_length = column_width - name_len - size_len as Coord;
-        cs.set_paint(&self.window, paint);
-        if empty_space_length < 1 {
-            // everything doesn't fit => sacrifice Size and truncate the Name
-            let name = System::truncate_with_delimiter(&entry.name, column_width);
-            let name_len = System::chars_amount(&name) as Coord;
-            let leftover = column_width - name_len;
-            mvprintw(&self.window, y, begin + 1, &name);
-            self.window.mv(y, begin + 1 + name_len);
-            self.window.hline(' ', leftover);
-        } else { // everything fits OK
-            mvprintw(&self.window, y, begin + 1, &entry.name);
-            self.window.mv(y, begin + 1 + name_len);
-            self.window.hline(' ', empty_space_length);
-            mvprintw(&self.window, y, begin + 1 + name_len + empty_space_length, &size);
-        }
+        self.renderer.maybe_draw_selection_warning(&mut cs, &mut bottom_bar, self.selected.is_empty());
+
+        let mut top_bar = Bar::with_y_and_width(0, self.renderer.display_settings.width);
+        self.renderer.draw_current_path(&mut cs, &mut top_bar, self.inside_empty_dir(),
+            &self.context_ref().parent_path, &self.context_ref().current_path);
+        self.renderer.draw_tabs(&mut cs, &mut top_bar, &self.tabs, self.current_tab_index);
+
+        self.renderer.maybe_draw_input_mode_cursor(&self.context_ref().input_mode);
+
+        self.renderer.refresh();
     }
 
-    fn list_entries(&self, mut cs: &mut ColorSystem, column_index: usize,
-            entries: &Vec<DirEntry>, cursor_index: Option<usize>, shift: usize) {
-        for (index, entry) in entries.into_iter().enumerate()
-                .skip(shift).take(self.display_settings.column_effective_height) {
-            let under_cursor = match cursor_index {
-                Some(i) => (i == index),
-                None    => false,
-            };
-            self.list_entry(&mut cs, column_index, index - shift,
-                            &entry, under_cursor, entry.is_selected);
-        }
+    pub fn draw_available_matches(&self, cs: &mut ColorSystem,
+            matches: &Vec<Match>, completion_count: usize) {
+        self.renderer.draw_available_matches(cs, matches, completion_count);
     }
 //-----------------------------------------------------------------------------
     pub fn select_under_cursor(&mut self) {
@@ -1212,391 +900,7 @@ impl System {
         self.maybe_sync_search_backup_selection_for_current_siblings();
     }
 //-----------------------------------------------------------------------------
-    fn clear(&self, cs: &mut ColorSystem) {
-        cs.set_paint(&self.window, self.settings.primary_paint);
-        for y in 0..self.display_settings.height {
-            self.window.mv(y, 0);
-            self.window.hline(' ', self.display_settings.width);
-        }
-    }
-
-    pub fn draw(&mut self, mut cs: &mut ColorSystem) {
-        self.clear(&mut cs);
-
-        self.update_transfer_progress();
-
-        self.draw_borders(&mut cs);
-        self.draw_left_column(&mut cs);
-        self.draw_middle_column(&mut cs);
-        self.draw_right_column(&mut cs);
-
-        let mut bottom_bar = Bar::with_y_and_width(
-            self.display_settings.height - 1, self.display_settings.width);
-        self.maybe_draw_input_mode(&mut cs, &mut bottom_bar);
-        self.draw_current_permission(&mut cs, &mut bottom_bar);
-        self.draw_current_size(&mut cs, &mut bottom_bar);
-        self.maybe_draw_additional_info_for_current(&mut cs, &mut bottom_bar);
-        self.draw_current_dir_siblings_count(&mut cs, &mut bottom_bar);
-        self.draw_cumulative_size_text(&mut cs, &mut bottom_bar);
-        self.update_and_draw_notification(&mut cs, &mut bottom_bar);
-        self.maybe_draw_selection_warning(&mut cs, &mut bottom_bar);
-
-        let mut top_bar = Bar::with_y_and_width(0, self.display_settings.width);
-        self.draw_current_path(&mut cs, &mut top_bar);
-        self.draw_tabs(&mut cs, &mut top_bar);
-
-        self.maybe_draw_input_mode_cursor();
-
-        self.window.refresh();
-    }
-
-    fn draw_borders(&self, color_system: &mut ColorSystem) {
-        color_system.set_paint(&self.window, self.settings.primary_paint);
-        let (width, height) = (self.display_settings.width, self.display_settings.height);
-
-        self.window.mv(1, 0);
-        self.window.addch(ACS_ULCORNER());
-        self.window.hline(ACS_HLINE(), width - 2);
-        self.window.mv(1, width - 1);
-        self.window.addch(ACS_URCORNER());
-
-        self.window.mv(height - 2, 0);
-        self.window.addch(ACS_LLCORNER());
-        self.window.hline(ACS_HLINE(), width - 2);
-        self.window.mv(height - 2, width-1);
-        self.window.addch(ACS_LRCORNER());
-
-        for y in 2..height-2 {
-            self.window.mv(y, 0);
-            self.window.addch(ACS_VLINE());
-            self.window.mv(y, width - 1);
-            self.window.addch(ACS_VLINE());
-        }
-
-        // For columns
-        for (start, _end) in self.display_settings.columns_coord.iter().skip(1) {
-            self.draw_column(color_system, *start);
-        }
-    }
-
-    fn draw_left_column(&self, mut cs: &mut ColorSystem) {
-        let column_index = 0;
-        let context = self.context_ref();
-        self.list_entries(&mut cs, column_index, &context.parent_siblings,
-                Some(context.parent_index), context.parent_siblings_shift);
-    }
-
-    fn draw_middle_column(&self, mut cs: &mut ColorSystem) {
-        let column_index = 1;
-        if self.inside_empty_dir() {
-            self.draw_empty_sign(&mut cs, column_index);
-        } else {
-            let context = self.context_ref();
-            self.list_entries(&mut cs, column_index, &context.current_siblings,
-                Some(context.current_index), context.current_siblings_shift);
-        }
-    }
-
-    fn draw_right_column(&self, mut cs: &mut ColorSystem) {
-        let column_index = 2;
-        if let Some(siblings) = self.context_ref().right_column.siblings_ref() {
-            // Have siblings (Some or None) => are sure to be in a dir or symlink
-            if siblings.is_empty() {
-                self.draw_empty_sign(&mut cs, column_index);
-            } else {
-                self.list_entries(&mut cs, column_index, siblings, None, 0);
-            }
-        } else if let Some(preview) = self.context_ref().right_column.preview_ref() {
-            let (begin, _) = self.display_settings.columns_coord[column_index];
-            let y = self.display_settings.entries_display_begin;
-            cs.set_paint(&self.window, self.settings.preview_paint);
-            for (i, line) in preview.iter().enumerate() {
-                mvprintw(&self.window, y + i as Coord, begin + 1, line);
-            }
-        } // display nothing otherwise
-    }
-
-    fn draw_current_path(&self, cs: &mut ColorSystem, bar: &mut Bar) {
-        cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
-        if self.inside_empty_dir() {
-            let text = path_to_string(&self.context_ref().parent_path) + "/<?>";
-            bar.draw_left(&self.window, &text, 2);
-        } else {
-            let path = self.context_ref().current_path.as_ref().unwrap().to_str().unwrap();
-            bar.draw_left(&self.window, path, 2);
-        }
-    }
-
-    fn maybe_draw_input_mode(&self, cs: &mut ColorSystem, bar: &mut Bar) {
-        match self.context_ref().input_mode.as_ref() {
-            Some(InputMode::Search(SearchTools {query, ..})) => {
-                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default).bold());
-                bar.draw_left(&self.window, "/", 0);
-                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Purple, Color::Default));
-                bar.draw_left(&self.window, query, 2);
-            },
-            Some(InputMode::ChangeName(ChangeNameTools {new_name, ..})) => {
-                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default).bold());
-                bar.draw_left(&self.window, "change to:", 0);
-                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Purple, Color::Default));
-                bar.draw_left(&self.window, new_name, 2);
-            },
-            Some(InputMode::Command(CommandTools {text, ..})) => {
-                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default).bold());
-                bar.draw_left(&self.window, ":> ", 0);
-                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Purple, Color::Default));
-                bar.draw_left(&self.window, text, 2);
-            },
-            _ => {},
-        }
-    }
-
-    fn maybe_draw_input_mode_cursor(&self) {
-        match self.context_ref().input_mode.as_ref() {
-            Some(InputMode::Search(SearchTools {cursor_index, ..})) => {
-                if let Some(index) = cursor_index {
-                    const PREFIX_LEN: i32 = "/".len() as i32;
-                    self.window.mv(self.display_settings.height - 1, PREFIX_LEN + *index as Coord);
-                }
-            },
-            Some(InputMode::ChangeName(ChangeNameTools {cursor_index, ..})) => {
-                const PREFIX_LEN: i32 = "change to:".len() as i32;
-                self.window.mv(self.display_settings.height - 1, PREFIX_LEN + *cursor_index as Coord);
-            }
-            Some(InputMode::Command(CommandTools {cursor_index, ..})) => {
-                const PREFIX_LEN: i32 = ":> ".len() as i32;
-                self.window.mv(self.display_settings.height - 1, PREFIX_LEN + *cursor_index as Coord);
-            }
-            _ => {},
-        }
-    }
-
-    fn draw_current_permission(&self, cs: &mut ColorSystem, bar: &mut Bar) {
-        if self.context_ref().current_path.is_some() {
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
-            bar.draw_left(&self.window, &self.context_ref().current_permissions, 2);
-        }
-    }
-
-    fn draw_current_size(&self, cs: &mut ColorSystem, bar: &mut Bar) {
-        if self.context_ref().current_path.is_some() {
-            let size = System::human_size(self.unsafe_current_entry_ref().size);
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Blue, Color::Default));
-            bar.draw_left(&self.window, &size, 2);
-        }
-    }
-
-    fn maybe_draw_additional_info_for_current(&self, cs: &mut ColorSystem, bar: &mut Bar) {
-        if let Some(info) = self.context_ref().additional_entry_info.as_ref() {
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
-            bar.draw_left(&self.window, &info, 2);
-        }
-    }
-
-    fn draw_current_dir_siblings_count(&self, cs: &mut ColorSystem, bar: &mut Bar) {
-        let count = self.context_ref().current_siblings.len().to_string();
-        let text = "Siblings = ".to_string() + &count;
-        cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
-        bar.draw_left(&self.window, &text, 2);
-    }
-
-    fn draw_cumulative_size_text(&self, cs: &mut ColorSystem, bar: &mut Bar) {
-        if let Some(text) = self.context_ref().cumulative_size_text.as_ref() {
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-            bar.draw_left(&self.window, text, 2);
-        }
-    }
-
-    fn update_and_draw_notification(&mut self, cs: &mut ColorSystem, bar: &mut Bar) {
-        if let Some(notification) = self.notification.as_ref() {
-            if notification.has_finished() {
-                self.notification = None;
-            } else {
-                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-                bar.draw_right(&self.window, &notification.text, 2);
-            }
-        }
-    }
-
-    fn maybe_draw_selection_warning(&self, cs: &mut ColorSystem, bar: &mut Bar) {
-        if !self.selected.is_empty() {
-            cs.set_paint(&self.window, Paint::with_fg_bg(Color::Red, Color::Default).bold());
-            bar.draw_left(&self.window, "Selection not empty", 2);
-        }
-    }
-
-    fn draw_tabs(&self, cs: &mut ColorSystem, bar: &mut Bar) {
-        if self.tabs.len() == 1 { return; }
-        for (index, tab) in self.tabs.iter().enumerate().rev() {
-            if index == self.current_tab_index {
-                cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default).bold());
-            } else {
-                cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
-            }
-            let text = "<".to_string() + &index.to_string() + ":" + &tab.name + &">".to_string();
-            bar.draw_right(&self.window, &text, 0);
-        }
-    }
 //-----------------------------------------------------------------------------
-    pub fn draw_available_matches(&self, cs: &mut ColorSystem,
-            matches: &Vec<Match>, completion_count: usize) {
-        if matches.is_empty() { return; }
-
-        // Borders
-        cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-        let y = self.display_settings.height - 2 - matches.len() as Coord - 1;
-        self.window.mv(y, 0);
-        self.window.hline(ACS_HLINE(), self.display_settings.width);
-        self.window.mv(self.display_settings.height - 2, 0);
-        self.window.hline(ACS_HLINE(), self.display_settings.width);
-
-        let max_len = max_combination_len() as Coord;
-        for (i, (combination, command)) in matches.iter().enumerate() {
-            if let Combination::Str(combination) = combination {
-                let y = y + 1 + i as Coord;
-
-                // Combination
-                let (completed_part, uncompleted_part) = combination.split_at(completion_count);
-                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default).bold());
-                mvprintw(&self.window, y, 0, &completed_part);
-                cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
-                printw(  &self.window,       &uncompleted_part);
-
-                // Space till description
-                let left = max_len - combination.len() as Coord;
-                self.window.hline(' ', left);
-
-                // Command description
-                let description = description_of(&command);
-                mvprintw(&self.window, y, max_len as Coord, &description);
-
-                // Space till end
-                let left = self.display_settings.width - max_len - description.len() as Coord;
-                self.window.hline(' ', left);
-            }
-        }
-    }
-
-    fn draw_empty_sign(&self, cs: &mut ColorSystem, column_index: usize) {
-        cs.set_paint(&self.window, Paint::with_fg_bg(Color::Black, Color::Red).bold());
-        let (begin, _) = self.display_settings.columns_coord[column_index];
-        mvprintw(&self.window, self.display_settings.entries_display_begin, begin + 1, "empty");
-    }
-
-    fn draw_column(&self, color_system: &mut ColorSystem, x: Coord) {
-        color_system.set_paint(&self.window, self.settings.primary_paint);
-        self.window.mv(1, x);
-        self.window.addch(ACS_TTEE());
-        self.window.mv(2, x);
-        self.window.vline(ACS_VLINE(), self.display_settings.height-4);
-        self.window.mv(self.display_settings.height-2, x);
-        self.window.addch(ACS_BTEE());
-    }
-//-----------------------------------------------------------------------------
-    fn maybe_truncate(string: &str, max_length: usize) -> String {
-        let mut result = String::new();
-        let string = string.replace("\r", "^M").replace("\t", "    "); // assume tab_size=4
-        let mut chars = string.chars().take(max_length);
-        while let Some(c) = chars.next() {
-            result.push(c);
-        }
-        result
-    }
-
-    fn truncate_with_delimiter(string: &str, max_length: Coord) -> String {
-        let chars_amount = System::chars_amount(&string);
-        if chars_amount > max_length as usize {
-            let delimiter = "...";
-            let leave_at_end = 5;
-            let total_end_len = leave_at_end + delimiter.len();
-            let start = max_length as usize - total_end_len;
-            let end = chars_amount - leave_at_end;
-            System::replace_range_with(string, start..end, delimiter)
-        } else {
-            string.clone().to_string()
-        }
-    }
-
-    // Does not validate the range
-    // May implement in the future: https://crates.io/crates/unicode-segmentation
-    fn replace_range_with<R>(string: &str, chars_range: R, replacement: &str) -> String
-            where R: RangeBounds<usize> {
-        use std::ops::Bound::*;
-        let start = match chars_range.start_bound() {
-            Unbounded   => 0,
-            Included(n) => *n,
-            Excluded(n) => *n + 1,
-        };
-        let chars_count = string.chars().count(); // TODO: improve
-        let end = match chars_range.end_bound() {
-            Unbounded   => chars_count,
-            Included(n) => *n + 1,
-            Excluded(n) => *n,
-        };
-
-        let mut chars = string.chars();
-        let mut result = String::new();
-        for _ in 0..start { result.push(chars.next().unwrap()); } // push first part
-        result.push_str(replacement); // push the replacement
-        let mut chars = chars.skip(end - start); // skip this part in the original
-        while let Some(c) = chars.next() { result.push(c); } // push the rest
-        result
-    }
-
-    fn maybe_selected_paint_from(paint: Paint, convert: bool) -> Paint {
-        if convert {
-            let Paint {fg, mut bg, bold: _, underlined} = paint;
-            if bg == Color::Default { bg = Color:: Black; }
-            Paint {fg: bg, bg: fg, bold: true, underlined}
-        } else { paint }
-    }
-
-    fn positions_from_ratio(ratio: &Vec<u32>, width: Coord) -> Vec<(Coord, Coord)> {
-        let width = width as f32;
-        let sum = ratio.iter().sum::<u32>() as f32;
-        let mut pos: Coord = 0;
-        let mut positions: Vec<(Coord, Coord)> = Vec::new();
-        let last_index = ratio.len() - 1;
-        for (index, r) in ratio.iter().enumerate() {
-            let weight = ((*r as f32 / sum) * width) as Coord;
-            let end = if index == last_index {
-                width as Coord - 2
-            } else {
-                pos + weight
-            };
-            positions.push((pos, end));
-            pos += weight + 1;
-        }
-        positions
-    }
-
-    pub fn human_size(mut size: u64) -> String {
-        if size < 1024 { return size.to_string() + " B"; }
-
-        let mut letter_index = 0;
-        let mut full;
-        loop {
-            full = size / 1024;
-            if full < 1024 { break; }
-            letter_index += 1;
-            size /= 1024;
-        }
-
-        let mut string = full.to_string();
-        let remainder = size % 1024;
-        if remainder != 0 {
-            string += ".";
-            string += &(remainder * 10 / 1024).to_string();
-        }
-        string += " ";
-
-        string += "KMGTP".get(letter_index..letter_index+1).expect("Size too large");
-        string
-    }
-
-    fn chars_amount(string: &str) -> usize {
-        string.chars().count()
-    }
 //-----------------------------------------------------------------------------
     fn setup() -> Window {
         let window = initscr();
@@ -1624,13 +928,23 @@ impl System {
         half_delay(drawing_delay.ms() / 100); // expects argument in tens of a second
     }
 
-    fn get_height_width(window: &Window) -> (Coord, Coord) {
-        window.get_max_yx()
+    pub fn resize(&mut self) {
+        self.renderer.display_settings = DisplaySettings::generate(
+            &self.renderer.window, self.settings.scrolling_gap, &self.settings.columns_ratio);
+        self.context_mut().right_column = self.collect_right_column_of_current();
+        self.context_mut().parent_siblings_shift = siblings_shift_for(
+            self.renderer.display_settings.scrolling_gap,
+            self.renderer.display_settings.column_effective_height,
+            self.context_ref().parent_index, self.context_ref().parent_siblings.len(), None);
+        self.context_mut().current_siblings_shift = siblings_shift_for(
+            self.renderer.display_settings.scrolling_gap,
+            self.renderer.display_settings.column_effective_height,
+            self.context_ref().current_index, self.context_ref().current_siblings.len(), None);
     }
 
     pub fn get(&self) -> Option<Input> {
         use pancurses::Input as PInput;
-        match self.window.getch() {
+        match self.renderer.getch() {
             Some(PInput::Character('\t'))   => Some(Input::Tab),
             Some(PInput::Character('\x1B')) => Some(Input::Escape), // \e === \x1B
             Some(PInput::Character('\x7f')) => Some(Input::Backspace),
@@ -1645,18 +959,6 @@ impl System {
             _                               => Some(Input::Unknown),
         }
     }
-
-    pub fn resize(&mut self) {
-        self.display_settings = System::generate_display_settings(
-            &self.window, self.settings.scrolling_gap, &self.settings.columns_ratio);
-        self.context_mut().right_column = self.collect_right_column_of_current();
-        self.context_mut().parent_siblings_shift = System::siblings_shift_for(
-            self.display_settings.scrolling_gap, self.display_settings.column_effective_height,
-            self.context_ref().parent_index, self.context_ref().parent_siblings.len(), None);
-        self.context_mut().current_siblings_shift = System::siblings_shift_for(
-            self.display_settings.scrolling_gap, self.display_settings.column_effective_height,
-            self.context_ref().current_index, self.context_ref().current_siblings.len(), None);
-    }
 }
 
 impl Drop for System {
@@ -1667,63 +969,7 @@ impl Drop for System {
     }
 }
 //-----------------------------------------------------------------------------
-fn printw(window: &Window, string: &str) -> Coord {
-    // To avoid printw's substitution
-    let string = string.to_string().replace("%", "%%");
-    window.printw(string)
-}
 
-fn mvprintw(window: &Window, y: Coord, x: Coord, string: &str) -> Coord {
-    window.mv(y, x);
-    printw(window, string)
-}
-
-fn millis_since(time: SystemTime) -> Millis {
-    let elapsed = SystemTime::now().duration_since(time);
-    if elapsed.is_err() { return 0; } // _now_ is earlier than _time_ => assume 0
-    elapsed.unwrap().as_millis()
-}
-//-----------------------------------------------------------------------------
-#[derive(Clone)]
-struct RightColumn {
-    siblings: Option<Vec<DirEntry>>,
-    preview: Option<Vec<String>>,
-}
-
-impl RightColumn {
-    fn with_siblings(siblings: Vec<DirEntry>) -> RightColumn {
-        RightColumn {
-            siblings: Some(siblings),
-            preview: None,
-        }
-    }
-
-    fn with_preview(preview: Vec<String>) -> RightColumn {
-        RightColumn {
-            siblings: None,
-            preview: Some(preview),
-        }
-    }
-
-    fn empty() -> RightColumn {
-        RightColumn {
-            siblings: None,
-            preview: None,
-        }
-    }
-
-    fn siblings_ref(&self) -> Option<&Vec<DirEntry>> {
-        self.siblings.as_ref()
-    }
-
-    fn siblings_mut(&mut self) -> Option<&mut Vec<DirEntry>> {
-        self.siblings.as_mut()
-    }
-
-    fn preview_ref(&self) -> Option<&Vec<String>> {
-        self.preview.as_ref()
-    }
-}
 //-----------------------------------------------------------------------------
 enum DrawingDelay {
     Transfering,
@@ -1739,53 +985,6 @@ impl DrawingDelay {
     }
 }
 //-----------------------------------------------------------------------------
-struct Bar {
-    y: Coord,
-    ready_left: Coord, // x Coord of the first not-taken cell from the left
-    ready_right: Coord, // x Coord of the first taken cell after all not-talen
-}
-
-impl Bar {
-    fn draw_left(&mut self, window: &Window, text: &str, padding: Coord) {
-        let len = text.len();
-        let free = self.free_space();
-        if len > free {
-            let mut copy = text.to_string().clone();
-            copy.truncate(free);
-            mvprintw(window, self.y, self.ready_left, &copy);
-            self.ready_left += free as Coord + padding;
-        } else {
-            mvprintw(window, self.y, self.ready_left, &text);
-            self.ready_left += len as Coord + padding;
-        }
-    }
-
-    fn draw_right(&mut self, window: &Window, text: &str, padding: Coord) {
-        let len = text.len();
-        let free = self.free_space();
-        if len > free {
-            let mut copy = text.to_string().clone();
-            copy.truncate(free);
-            mvprintw(window, self.y, self.ready_right - free as Coord, &copy);
-            self.ready_right -= free as Coord + padding;
-        } else {
-            mvprintw(window, self.y, self.ready_right - len as Coord, &text);
-            self.ready_right -= len as Coord + padding;
-        }
-    }
-
-    fn free_space(&self) -> usize {
-        (self.ready_right - self.ready_left + 1) as usize
-    }
-
-    fn with_y_and_width(y: Coord, width: Coord) -> Bar {
-        Bar {
-            y,
-            ready_left: 0,
-            ready_right: width,
-        }
-    }
-}
 //-----------------------------------------------------------------------------
 enum TransferType {
     Yank,
@@ -1833,110 +1032,3 @@ impl PotentialTransfer {
         }
     }
 }
-//-----------------------------------------------------------------------------
-type Millis = u128;
-
-struct Notification {
-    text: String,
-    show_time_millis: Millis,
-    start_time: SystemTime,
-}
-
-impl Notification {
-    fn new(text: &str, show_time_millis: Millis) -> Notification {
-        let text = text.to_string();
-        Notification {
-            text,
-            show_time_millis,
-            start_time: SystemTime::now(),
-        }
-    }
-
-    fn has_finished(&self) -> bool {
-        millis_since(self.start_time) > self.show_time_millis
-    }
-}
-//-----------------------------------------------------------------------------
-#[derive(Clone)]
-struct DirEntry {
-    entrytype: EntryType,
-    name: String,
-    size: u64,
-    time_modified: u64,
-    permissions: Permissions,
-
-    paint: Paint,
-    is_selected: bool,
-}
-
-impl DirEntry {
-    fn is_partially_executable(entry: &Entry) -> bool {
-        (entry.permissions.world % 2 == 1) ||
-        (entry.permissions.group % 2 == 1) ||
-        (entry.permissions.owner % 2 == 1)
-    }
-
-    fn from_entry(entry: Entry, paint_settings: &PaintSettings, is_selected: bool) -> DirEntry {
-        let executable = DirEntry::is_partially_executable(&entry);
-        let paint = paint_for(&entry.entrytype, &entry.name, executable, paint_settings);
-        DirEntry {
-            entrytype: entry.entrytype,
-            name: entry.name,
-            size: entry.size,
-            time_modified: entry.time_modified,
-            permissions: entry.permissions,
-            paint,
-            is_selected,
-        }
-    }
-
-    fn is_symlink(&self) -> bool {
-        self.entrytype == EntryType::Symlink
-    }
-    // fn is_regular(&self) -> bool {
-    //     self.entrytype == EntryType::Regular
-    // }
-    fn is_dir(&self) -> bool {
-        self.entrytype == EntryType::Directory
-    }
-}
-
-fn paint_for(entrytype: &EntryType, name: &str,
-        executable: bool, paint_settings: &PaintSettings) -> Paint {
-    match entrytype {
-        EntryType::Directory => paint_settings.dir_paint,
-        EntryType::Symlink   => paint_settings.symlink_paint,
-        EntryType::Unknown   => paint_settings.unknown_paint,
-        EntryType::Regular   =>
-            if let Some(paint) = maybe_paint_by_name(name) { paint }
-            else if executable { Paint::with_fg_bg(Color::Green, Color::Default).bold() }
-            else { paint_settings.file_paint },
-    }
-}
-
-fn maybe_paint_by_name(name: &str) -> Option<Paint> {
-    if      name.ends_with(".cpp")  { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
-    else if name.ends_with(".java") { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
-    else if name.ends_with(".rs")   { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
-    else if name.ends_with(".h")    { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
-    else if name.ends_with(".pdf")  { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
-    else if name.ends_with(".djvu") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default).bold()) }
-    else if name.ends_with(".mp3")  { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)       ) }
-    else if name.ends_with(".webm") { return Some(Paint::with_fg_bg(Color::Yellow, Color::Default)       ) }
-    else if name.ends_with(".png")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
-    else if name.ends_with(".gif")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
-    else if name.ends_with(".jpg")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
-    else if name.ends_with(".jpeg") { return Some(Paint::with_fg_bg(Color::Purple, Color::Default)       ) }
-    else if name.ends_with(".mkv")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
-    else if name.ends_with(".avi")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
-    else if name.ends_with(".mp4")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
-    None
-}
-//-----------------------------------------------------------------------------
-#[derive(Clone)]
-struct Tab {
-    name: String,
-    context: Context,
-}
-//-----------------------------------------------------------------------------
-type Coord = i32;

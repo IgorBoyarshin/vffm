@@ -17,6 +17,14 @@ use crate::filesystem::*;
 mod input;
 use crate::input::*;
 
+mod direntry;
+mod right_column;
+mod input_mode;
+mod spawn;
+mod drawing;
+mod context;
+mod tab;
+
 use std::path::PathBuf;
 
 

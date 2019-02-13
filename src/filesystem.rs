@@ -290,6 +290,31 @@ fn size(path: &PathBuf) -> Size {
         .len()
 }
 
+pub fn human_size(mut size: u64) -> String {
+    if size < 1024 { return size.to_string() + " B"; }
+
+    let mut letter_index = 0;
+    let mut full;
+    loop {
+        full = size / 1024;
+        if full < 1024 { break; }
+        letter_index += 1;
+        size /= 1024;
+    }
+
+    let mut string = full.to_string();
+    let remainder = size % 1024;
+    if remainder != 0 {
+        string += ".";
+        string += &(remainder * 10 / 1024).to_string();
+    }
+    string += " ";
+
+    string += "KMGTP".get(letter_index..letter_index+1).expect("Size too large");
+    string
+}
+
+
 pub fn cumulative_size(path: &PathBuf) -> Size {
     let meta = path.symlink_metadata();
     if meta.is_err() { return 0; }
@@ -307,4 +332,9 @@ pub fn absolute_pathbuf() -> PathBuf {
 
 pub fn is_root(path: &PathBuf) -> bool {
     path.parent() == None
+}
+
+pub fn maybe_parent(path: &PathBuf) -> Option<PathBuf> {
+    if path_to_str(path) == "/" { None }
+    else { Some(path.parent().unwrap().to_path_buf()) }
 }
