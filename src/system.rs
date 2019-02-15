@@ -5,6 +5,7 @@ use std::collections::{HashSet};
 // use std::collections::{HashMap};
 
 use crate::coloring::*;
+use crate::utils::*;
 use crate::right_column::*;
 use crate::filesystem::*;
 use crate::input::*;
@@ -14,10 +15,8 @@ use crate::spawn::*;
 use crate::drawing::*;
 use crate::context::*;
 use crate::tab::*;
-
-
+use crate::notification::*;
 //-----------------------------------------------------------------------------
-
 pub struct Settings {
     pub paint_settings: PaintSettings,
     pub primary_paint: Paint,
@@ -500,7 +499,7 @@ impl System {
     }
 
 //-----------------------------------------------------------------------------
-    fn get_current_permissions(&mut self) -> String {
+    fn get_current_permissions(&mut self) -> Option<String> {
         string_permissions_for_entry(&self.current_entry_ref())
     }
 
@@ -642,6 +641,14 @@ impl System {
 
         // Slow down the pace
         if self.transfers.is_empty() { System::set_drawing_delay(DrawingDelay::Regular); }
+    }
+
+    fn update_notification(&mut self) {
+        if let Some(notification) = self.notification.as_ref() {
+            if notification.has_finished() {
+                self.notification = None;
+            }
+        }
     }
 //-----------------------------------------------------------------------------
     fn collect_sorted_siblings_of_parent(&self) -> Vec<DirEntry> {
@@ -792,6 +799,7 @@ impl System {
         self.renderer.clear(&mut cs, self.settings.primary_paint);
 
         self.update_transfer_progress();
+        self.update_notification();
 
         self.renderer.draw_borders(&mut cs, self.settings.primary_paint);
         self.renderer.draw_left_column(&mut cs, &self.context_ref().parent_siblings,
@@ -807,19 +815,16 @@ impl System {
             self.renderer.display_settings.height - 1, self.renderer.display_settings.width);
         self.renderer.maybe_draw_input_mode(&mut cs, &mut bottom_bar, &self.context_ref().input_mode);
         self.renderer.draw_current_permission(&mut cs, &mut bottom_bar,
-                              &self.context_ref().current_permissions,
-                              self.inside_empty_dir());
+            &self.context_ref().current_permissions);
         self.renderer.draw_current_size(&mut cs, &mut bottom_bar,
-                                        self.current_entry_ref().map(|e| e.size));
+            self.current_entry_ref().map(|e| e.size));
         self.renderer.maybe_draw_additional_info_for_current(&mut cs, &mut bottom_bar,
-                                             &self.context_ref().additional_entry_info);
+            &self.context_ref().additional_entry_info);
         self.renderer.draw_current_dir_siblings_count(&mut cs, &mut bottom_bar,
-                                                  &self.context_ref().current_siblings);
+            &self.context_ref().current_siblings);
         self.renderer.draw_cumulative_size_text(&mut cs, &mut bottom_bar,
-                                    &self.context_ref().cumulative_size_text);
-        if self.renderer.update_and_draw_notification(&mut cs, &mut bottom_bar, &self.notification) {
-            self.notification = None;
-        }
+            &self.context_ref().cumulative_size_text);
+        self.renderer.draw_notification(&mut cs, &mut bottom_bar, &self.notification);
         self.renderer.maybe_draw_selection_warning(&mut cs, &mut bottom_bar, self.selected.is_empty());
 
         let mut top_bar = Bar::with_y_and_width(0, self.renderer.display_settings.width);

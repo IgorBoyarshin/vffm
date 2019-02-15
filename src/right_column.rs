@@ -1,7 +1,7 @@
 use crate::direntry::*;
 use crate::input::*;
 use crate::coloring::*;
-use crate::drawing::*;
+use crate::utils::*;
 use crate::spawn::*;
 use crate::filesystem::*;
 use std::path::PathBuf;

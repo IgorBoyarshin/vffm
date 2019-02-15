@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use pancurses::*;
-use crate::filesystem::*;
+use pancurses::{Window, init_pair, init_color, A_BOLD, A_UNDERLINE, ColorPair};
+use crate::filesystem::{EntryType};
 
 
 type ColorComponent = i16;
@@ -13,6 +13,15 @@ pub struct PaintSettings {
     pub symlink_paint: Paint,
     pub file_paint: Paint,
     pub unknown_paint: Paint,
+    pub executable_paint: Paint,
+}
+
+pub fn maybe_selected_paint_from(paint: Paint, convert: bool) -> Paint {
+    if convert {
+        let Paint {fg, mut bg, bold: _, underlined} = paint;
+        if bg == Color::Default { bg = Color:: Black; }
+        Paint {fg: bg, bg: fg, bold: true, underlined}
+    } else { paint }
 }
 
 pub fn paint_for(entrytype: &EntryType, name: &str,
@@ -22,13 +31,13 @@ pub fn paint_for(entrytype: &EntryType, name: &str,
         EntryType::Symlink   => paint_settings.symlink_paint,
         EntryType::Unknown   => paint_settings.unknown_paint,
         EntryType::Regular   =>
-            if let Some(paint) = maybe_paint_by_name(name) { paint }
-            else if executable { Paint::with_fg_bg(Color::Green, Color::Default).bold() }
-            else { paint_settings.file_paint },
+            if let Some(paint) = maybe_paint_for_name(name) { paint }
+            else if executable { paint_settings.executable_paint }
+            else               { paint_settings.file_paint },
     }
 }
 
-fn maybe_paint_by_name(name: &str) -> Option<Paint> {
+fn maybe_paint_for_name(name: &str) -> Option<Paint> {
     if      name.ends_with(".cpp")  { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
     else if name.ends_with(".java") { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
     else if name.ends_with(".rs")   { return Some(Paint::with_fg_bg(Color::Red,    Color::Default)       ) }
@@ -46,8 +55,6 @@ fn maybe_paint_by_name(name: &str) -> Option<Paint> {
     else if name.ends_with(".mp4")  { return Some(Paint::with_fg_bg(Color::Purple, Color::Default).bold()) }
     None
 }
-
-
 
 pub enum Attr {
     Bold, Underlined,
@@ -95,7 +102,7 @@ impl Paint {
         self.bold = true;
         self
     }
-    //
+
     // pub fn underlined(mut self) -> Self {
     //     self.underlined = true;
     //     self
@@ -115,10 +122,10 @@ fn get_rgb(color: Color) -> RGB {
         Color::Cyan => (0, 1000, 1000),
         Color::White => (1000, 1000, 1000),
         Color::Grey => (400, 400, 400),
-        Color::Default => (0, 0, 0), // Is handled in get_maybe_add_color(). Should not be used here
+        Color::Default => panic!("Color::Default not handled in get_maybe_add_color()"),
     }
 }
-//-----------------------------------------------------------------------------
+
 pub struct ColorSystem {
     next_colorid_to_use: ColorId,
     next_paintid_to_use: PaintId,
@@ -130,7 +137,7 @@ pub struct ColorSystem {
 impl ColorSystem {
     pub fn new() -> ColorSystem {
         ColorSystem {
-            // apparently previous ones are reserved for colors and so
+            // apparently [0..7] are reserved for default colors and so
             // attributes conflict with them when invoked, so start with 8
             next_colorid_to_use: 8,
             next_paintid_to_use: 1,
@@ -148,16 +155,12 @@ impl ColorSystem {
     pub fn set_paint(&mut self, window: &Window, paint: Paint) {
         let paint_id = self.get_maybe_add_paint(paint);
         window.attron(ColorPair(paint_id as u8));
-        if paint.bold {
-            self.set_attr(&window, Attr::Bold, Mode::On);
-        } else {
-            self.set_attr(&window, Attr::Bold, Mode::Off);
-        }
-        if paint.underlined {
-            self.set_attr(&window, Attr::Underlined, Mode::On);
-        } else {
-            self.set_attr(&window, Attr::Underlined, Mode::Off);
-        }
+
+        if paint.bold { self.set_attr(&window, Attr::Bold, Mode::On);
+        } else        { self.set_attr(&window, Attr::Bold, Mode::Off); }
+
+        if paint.underlined { self.set_attr(&window, Attr::Underlined, Mode::On);
+        } else              { self.set_attr(&window, Attr::Underlined, Mode::Off); }
     }
 
     pub fn set_attr(&mut self, window: &Window, attr: Attr, mode: Mode) {

@@ -2,7 +2,6 @@ use crate::filesystem::*;
 use crate::coloring::*;
 use crate::input::*;
 use std::path::PathBuf;
-use std::time::SystemTime;
 
 #[derive(Clone)]
 pub struct DirEntry {
@@ -17,19 +16,24 @@ pub struct DirEntry {
 }
 
 impl DirEntry {
-
     pub fn from_entry(entry: Entry, paint_settings: &PaintSettings, is_selected: bool) -> DirEntry {
-        let executable = is_partially_executable(&entry);
+        let executable = DirEntry::is_partially_executable(&entry);
         let paint = paint_for(&entry.entrytype, &entry.name, executable, paint_settings);
         DirEntry {
-            entrytype: entry.entrytype,
-            name: entry.name,
-            size: entry.size,
+            entrytype:     entry.entrytype,
+            name:          entry.name,
+            size:          entry.size,
             time_modified: entry.time_modified,
-            permissions: entry.permissions,
+            permissions:   entry.permissions,
             paint,
             is_selected,
         }
+    }
+
+    fn is_partially_executable(entry: &Entry) -> bool {
+        (entry.permissions.world % 2 == 1) ||
+        (entry.permissions.group % 2 == 1) ||
+        (entry.permissions.owner % 2 == 1)
     }
 
     pub fn is_symlink(&self) -> bool {
@@ -43,41 +47,6 @@ impl DirEntry {
     }
 }
 
-// TODO: move all
-pub type Millis = u128;
-
-pub struct Notification {
-    pub text: String,
-    show_time_millis: Millis,
-    start_time: SystemTime,
-}
-
-impl Notification {
-    pub fn new(text: &str, show_time_millis: Millis) -> Notification {
-        let text = text.to_string();
-        Notification {
-            text,
-            show_time_millis,
-            start_time: SystemTime::now(),
-        }
-    }
-
-    pub fn has_finished(&self) -> bool {
-        millis_since(self.start_time) > self.show_time_millis
-    }
-}
-
-pub fn millis_since(time: SystemTime) -> Millis {
-    let elapsed = SystemTime::now().duration_since(time);
-    if elapsed.is_err() { return 0; } // _now_ is earlier than _time_ => assume 0
-    elapsed.unwrap().as_millis()
-}
-
-pub fn is_partially_executable(entry: &Entry) -> bool {
-    (entry.permissions.world % 2 == 1) ||
-    (entry.permissions.group % 2 == 1) ||
-    (entry.permissions.owner % 2 == 1)
-}
 
 pub fn get_additional_entry_info(entry: Option<&DirEntry>, path: &Option<PathBuf>)
         -> Option<String> {
@@ -98,7 +67,7 @@ pub fn get_additional_entry_info(entry: Option<&DirEntry>, path: &Option<PathBuf
     None
 }
 
-pub fn get_symlink_target(path: &Option<PathBuf>) -> Option<String> {
+fn get_symlink_target(path: &Option<PathBuf>) -> Option<String> {
     if let Some(path) = path {
         if is_symlink(path) {
             if let Some(resolved) = resolve_symlink(path) {
@@ -109,11 +78,10 @@ pub fn get_symlink_target(path: &Option<PathBuf>) -> Option<String> {
     None
 }
 
-
 pub fn into_direntries(entries: Vec<Entry>,
-                   paint_settings: &PaintSettings,
-                   selected: &Vec<PathBuf>,
-                   parent_path: Option<&PathBuf>) -> Vec<DirEntry> {
+                       paint_settings: &PaintSettings,
+                       selected: &Vec<PathBuf>,
+                       parent_path: Option<&PathBuf>) -> Vec<DirEntry> {
     entries.into_iter().map(|entry| {
         let is_selected = is_selected(selected, &entry.name, parent_path);
         DirEntry::from_entry(entry, paint_settings, is_selected)
@@ -129,10 +97,10 @@ pub fn is_selected(selected: &Vec<PathBuf>, name: &str, parent_path: Option<&Pat
 
 
 pub fn into_sorted_direntries(entries: Vec<Entry>,
-                          paint_settings: &PaintSettings,
-                          sorting_type: &SortingType,
-                          selected: &Vec<PathBuf>,
-                          parent_path: Option<&PathBuf>) -> Vec<DirEntry> {
+                              paint_settings: &PaintSettings,
+                              sorting_type: &SortingType,
+                              selected: &Vec<PathBuf>,
+                              parent_path: Option<&PathBuf>) -> Vec<DirEntry> {
     let entries = into_direntries(entries, paint_settings, selected, parent_path);
     sort(entries, sorting_type)
 }
@@ -149,12 +117,7 @@ fn sort(mut entries: Vec<DirEntry>, sorting_type: &SortingType) -> Vec<DirEntry>
 }
 
 pub fn path_of_nth_entry_inside(n: usize, path: &PathBuf, entries: &Vec<DirEntry>) -> Option<PathBuf> {
-    if entries.is_empty() { return None; }
-    if n >= entries.len() { return None; }
-    let name = entries[n].name.clone();
-    let mut path = path.clone();
-    path.push(name);
-    Some(path)
+    nth_entry_inside(n, entries).map(|entry| path.join(entry.name.clone()))
 }
 
 pub fn nth_entry_inside(n: usize, entries: &Vec<DirEntry>) -> Option<&DirEntry> {
@@ -166,14 +129,11 @@ pub fn nth_entry_inside(n: usize, entries: &Vec<DirEntry>) -> Option<&DirEntry> 
 pub fn index_of_entry_inside(path: &PathBuf, entries: &Vec<DirEntry>) -> Option<usize> {
     if is_root(path) { return Some(0); }
     let sought_name = path.file_name().unwrap().to_str().unwrap();
-    for (index, DirEntry {name, ..}) in entries.iter().enumerate() {
-        if sought_name == name { return Some(index); }
-    }
-    None
+    entries.iter().position(|direntry| direntry.name == sought_name)
 }
 
-pub fn string_permissions_for_entry(entry: &Option<&DirEntry>) -> String {
+pub fn string_permissions_for_entry(entry: &Option<&DirEntry>) -> Option<String> {
     if let Some(entry) = entry {
-        entry.permissions.string_representation()
-    } else { "".to_string() }
+        Some(entry.permissions.string_representation())
+    } else { None }
 }

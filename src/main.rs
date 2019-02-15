@@ -24,6 +24,8 @@ mod spawn;
 mod drawing;
 mod context;
 mod tab;
+mod notification;
+mod utils;
 
 use std::path::PathBuf;
 
@@ -53,10 +55,11 @@ impl Overseer {
                 primary_paint: Paint::with_fg_bg(Color::White,  Color::Default),
                 preview_paint: Paint::with_fg_bg(Color::Green,  Color::Default),
                 paint_settings: PaintSettings {
-                    dir_paint:     Paint::with_fg_bg(Color::Cyan,   Color::Default).bold(),
-                    symlink_paint: Paint::with_fg_bg(Color::Yellow, Color::Default).bold(),
-                    file_paint:    Paint::with_fg_bg(Color::White,  Color::Default),
-                    unknown_paint: Paint::with_fg_bg(Color::Grey,   Color::White)  .bold(),
+                    dir_paint:        Paint::with_fg_bg(Color::Cyan,   Color::Default).bold(),
+                    symlink_paint:    Paint::with_fg_bg(Color::Yellow, Color::Default).bold(),
+                    file_paint:       Paint::with_fg_bg(Color::White,  Color::Default),
+                    unknown_paint:    Paint::with_fg_bg(Color::Grey,   Color::White)  .bold(),
+                    executable_paint: Paint::with_fg_bg(Color::Green,  Color::Default).bold(),
                 },
                 scrolling_gap: 4,
                 copy_done_notification_delay_ms: 2000,
@@ -97,7 +100,7 @@ impl Overseer {
                 if matches.len() > 0 {
                     let completion_count = if let Combination::Str(string) = combination {
                         string.len()
-                    } else { 0 }; // not supposed to happen
+                    } else { panic!("<TODO>") };
                     self.system.draw_available_matches(
                         &mut self.color_system, &matches, completion_count);
                 }

@@ -5,8 +5,10 @@ use crate::input_mode::*;
 use crate::drawing::*;
 use crate::coloring::*;
 use crate::input::*;
+use crate::utils::*;
 
 use std::path::PathBuf;
+
 
 #[derive(Clone)]
 pub struct Context {
@@ -23,7 +25,7 @@ pub struct Context {
     pub parent_siblings_shift: usize, // depends on display_settings
     pub current_siblings_shift: usize, // depends on display_settings
 
-    pub current_permissions: String,
+    pub current_permissions: Option<String>,
     pub additional_entry_info: Option<String>,
     pub cumulative_size_text: Option<String>,
 
@@ -32,21 +34,19 @@ pub struct Context {
 
 impl Context {
     pub fn generate(parent_path: PathBuf,
-                display_settings: &DisplaySettings,
-                paint_settings: &PaintSettings,
-                sorting_type: &SortingType,
-                include_hidden: bool,
-                selected: &Vec<PathBuf>) -> Context {
-        let current_siblings =
-            into_sorted_direntries(
-                collect_maybe_dir(&parent_path, None, include_hidden),
-                paint_settings, sorting_type,
-                selected, Some(&parent_path));
-        let parent_siblings =
-            into_sorted_direntries(
-               collect_siblings_of(&parent_path, include_hidden),
-               paint_settings, sorting_type, selected,
-               maybe_parent(&parent_path).as_ref());
+                    display_settings: &DisplaySettings,
+                    paint_settings: &PaintSettings,
+                    sorting_type: &SortingType,
+                    include_hidden: bool,
+                    selected: &Vec<PathBuf>) -> Context {
+        let current_siblings = into_sorted_direntries(
+            collect_maybe_dir(&parent_path, None, include_hidden),
+            paint_settings, sorting_type,
+            selected, Some(&parent_path));
+        let parent_siblings = into_sorted_direntries(
+            collect_siblings_of(&parent_path, include_hidden),
+            paint_settings, sorting_type, selected,
+            maybe_parent(&parent_path).as_ref());
         let first_entry_path = path_of_nth_entry_inside(0, &parent_path, &current_siblings);
         let first_entry_ref = nth_entry_inside(0, &current_siblings);
         let parent_index = index_of_entry_inside(&parent_path, &parent_siblings).unwrap();
@@ -54,20 +54,18 @@ impl Context {
         let column_index = 2;
         let (begin, end) = display_settings.columns_coord[column_index];
         let column_width = (end - begin) as usize;
-        let right_column =
-            RightColumn::collect(
-                &first_entry_path, paint_settings, sorting_type, include_hidden,
-                display_settings.column_effective_height, column_width, selected);
-        let parent_siblings_shift =
-            siblings_shift_for(
-                display_settings.scrolling_gap,
-                display_settings.column_effective_height,
-                parent_index, parent_siblings.len(), None);
-        let current_siblings_shift =
-            siblings_shift_for(
-                display_settings.scrolling_gap,
-                display_settings.column_effective_height,
-                current_index, current_siblings.len(), None);
+        let right_column = RightColumn::collect(
+            &first_entry_path, paint_settings, sorting_type, include_hidden,
+            display_settings.column_effective_height, column_width, selected);
+        let parent_siblings_shift = siblings_shift_for(
+            display_settings.scrolling_gap,
+            display_settings.column_effective_height,
+            parent_index, parent_siblings.len(), None);
+        let current_siblings_shift = siblings_shift_for(
+            display_settings.scrolling_gap,
+            display_settings.column_effective_height,
+            current_index, current_siblings.len(), None);
+
         Context {
             parent_index,
             current_index,

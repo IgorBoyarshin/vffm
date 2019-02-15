@@ -4,20 +4,22 @@ use crate::right_column::*;
 use crate::input_mode::*;
 use crate::input::*;
 use crate::tab::*;
-use std::path::PathBuf;
-use std::ops::RangeBounds;
+use crate::notification::*;
+use crate::coloring::*;
+use crate::utils::*;
 
+use std::path::PathBuf;
 use pancurses::{Window,
     ACS_CKBOARD, ACS_VLINE, ACS_HLINE, ACS_TTEE, ACS_BTEE,
     ACS_LLCORNER, ACS_LRCORNER, ACS_ULCORNER, ACS_URCORNER};
-use crate::coloring::*;
+
 
 pub type Coord = i32;
-
+//-----------------------------------------------------------------------------
 pub struct Bar {
     y: Coord,
     ready_left: Coord, // x Coord of the first not-taken cell from the left
-    ready_right: Coord, // x Coord of the first taken cell after all not-talen
+    ready_right: Coord, // x Coord of the first taken cell after all not-taken from the left
 }
 
 impl Bar {
@@ -61,26 +63,25 @@ impl Bar {
         (self.ready_right - self.ready_left + 1) as usize
     }
 }
-
+//-----------------------------------------------------------------------------
 pub struct DisplaySettings {
     pub height: Coord,
     pub width:  Coord,
     pub columns_coord: Vec<(Coord, Coord)>,
-
-    pub scrolling_gap: usize, // const
-    pub column_effective_height: usize, // const
-    entries_display_begin: Coord, // const
+    pub scrolling_gap: usize,
+    pub column_effective_height: usize,
+    entries_display_begin: Coord,
 }
 
 impl DisplaySettings {
-    pub fn generate(
-            window: &Window, scrolling_gap: usize, columns_ratio: &Vec<u32>)
+    pub fn generate(window: &Window, scrolling_gap: usize, columns_ratio: &Vec<u32>)
             -> DisplaySettings {
         let (height, width) = DisplaySettings::get_height_width(window);
         let column_effective_height = height as usize - 4; // gap+border+border+gap
         let scrolling_gap = DisplaySettings::resize_scrolling_gap_until_fits(
             scrolling_gap, column_effective_height);
         let columns_coord = DisplaySettings::positions_from_ratio(columns_ratio, width);
+
         DisplaySettings {
             height,
             width,
@@ -118,10 +119,8 @@ impl DisplaySettings {
         }
         positions
     }
-
-
 }
-
+//-----------------------------------------------------------------------------
 fn printw(window: &Window, string: &str) -> Coord {
     // To avoid printw's substitution
     let string = string.to_string().replace("%", "%%");
@@ -132,8 +131,7 @@ fn mvprintw(window: &Window, y: Coord, x: Coord, string: &str) -> Coord {
     window.mv(y, x);
     printw(window, string)
 }
-
-
+//-----------------------------------------------------------------------------
 pub struct Renderer {
     pub window: Window,
     pub display_settings: DisplaySettings,
@@ -159,8 +157,8 @@ impl Renderer {
         self.window.getch()
     }
 
-    pub fn clear(&self, cs: &mut ColorSystem, paint: Paint) {
-        cs.set_paint(&self.window, paint);
+    pub fn clear(&self, cs: &mut ColorSystem, clear_paint: Paint) {
+        cs.set_paint(&self.window, clear_paint);
         for y in 0..self.display_settings.height {
             self.window.mv(y, 0);
             self.window.hline(' ', self.display_settings.width);
@@ -190,45 +188,44 @@ impl Renderer {
             self.window.addch(ACS_VLINE());
         }
 
-        // For columns
         for (start, _end) in self.display_settings.columns_coord.iter().skip(1) {
-            self.draw_column(color_system, paint, *start);
+            self.draw_column_border(color_system, paint, *start);
         }
     }
 
     pub fn draw_left_column(&self, mut cs: &mut ColorSystem,
             siblings: &Vec<DirEntry>, index: usize, shift: usize) {
-        let column_index = 0;
-        self.list_entries(&mut cs, column_index, siblings, Some(index), shift);
+        const COLUMN_INDEX: usize = 0;
+        self.list_entries(&mut cs, COLUMN_INDEX, siblings, Some(index), shift);
     }
 
     pub fn draw_middle_column(&self, mut cs: &mut ColorSystem, inside_empty_dir: bool,
                               siblings: &Vec<DirEntry>, index: usize, shift: usize) {
-        let column_index = 1;
+        const COLUMN_INDEX: usize = 1;
         if inside_empty_dir {
-            self.draw_empty_sign(&mut cs, column_index);
+            self.draw_empty_sign(&mut cs, COLUMN_INDEX);
         } else {
-            self.list_entries(&mut cs, column_index, siblings, Some(index), shift);
+            self.list_entries(&mut cs, COLUMN_INDEX, siblings, Some(index), shift);
         }
     }
 
     pub fn draw_right_column(&self, mut cs: &mut ColorSystem, right_column: &RightColumn, preview_paint: Paint) {
-        let column_index = 2;
+        const COLUMN_INDEX: usize = 2;
         if let Some(siblings) = right_column.siblings_ref() {
-            // Have siblings (Some or None) => are sure to be in a dir or symlink
+            // Have siblings (Some or None) => are sure to be inside a dir or symlink
             if siblings.is_empty() {
-                self.draw_empty_sign(&mut cs, column_index);
+                self.draw_empty_sign(&mut cs, COLUMN_INDEX);
             } else {
-                self.list_entries(&mut cs, column_index, siblings, None, 0);
+                self.list_entries(&mut cs, COLUMN_INDEX, siblings, None, 0);
             }
         } else if let Some(preview) = right_column.preview_ref() {
-            let (begin, _) = self.display_settings.columns_coord[column_index];
+            let (begin, _) = self.display_settings.columns_coord[COLUMN_INDEX];
             let y = self.display_settings.entries_display_begin;
             cs.set_paint(&self.window, preview_paint);
             for (i, line) in preview.iter().enumerate() {
                 mvprintw(&self.window, y + i as Coord, begin + 1, line);
             }
-        } // display nothing otherwise
+        }
     }
 
     pub fn draw_current_path(&self, cs: &mut ColorSystem, bar: &mut Bar,
@@ -288,15 +285,14 @@ impl Renderer {
     }
 
     pub fn draw_current_permission(&self, cs: &mut ColorSystem,
-            bar: &mut Bar, current_permissions: &str, inside_empty_dir: bool) {
-        if !inside_empty_dir {
+            bar: &mut Bar, current_permissions: &Option<String>) {
+        if let Some(permissions) = current_permissions {
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
-            bar.draw_left(&self.window, current_permissions, 2);
+            bar.draw_left(&self.window, permissions, 2);
         }
     }
 
-    pub fn draw_current_size(&self, cs: &mut ColorSystem, bar: &mut Bar,
-            size: Option<u64>) {
+    pub fn draw_current_size(&self, cs: &mut ColorSystem, bar: &mut Bar, size: Option<u64>) {
         if let Some(size) = size {
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::Blue, Color::Default));
             bar.draw_left(&self.window, &human_size(size), 2);
@@ -305,7 +301,7 @@ impl Renderer {
 
     pub fn maybe_draw_additional_info_for_current(&self, cs: &mut ColorSystem,
             bar: &mut Bar, additional_entry_info: &Option<String>) {
-        if let Some(info) = additional_entry_info.as_ref() {
+        if let Some(info) = additional_entry_info {
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::LightBlue, Color::Default));
             bar.draw_left(&self.window, &info, 2);
         }
@@ -328,19 +324,14 @@ impl Renderer {
     }
 
     // returns whether to assign None to notification
-    pub fn update_and_draw_notification(&mut self, cs: &mut ColorSystem,
-            bar: &mut Bar, notification: &Option<Notification>) -> bool {
+    pub fn draw_notification(&mut self, cs: &mut ColorSystem,
+            bar: &mut Bar, notification: &Option<Notification>) {
         if let Some(notification) = notification.as_ref() {
-            if notification.has_finished() {
-                return true;
-                // self.notification = None;
-            } else {
+            if !notification.has_finished() {
                 cs.set_paint(&self.window, Paint::with_fg_bg(Color::Green, Color::Default));
                 bar.draw_right(&self.window, &notification.text, 2);
             }
         }
-
-        false
     }
 
     pub fn maybe_draw_selection_warning(&self, cs: &mut ColorSystem, bar: &mut Bar, selection_empty: bool) {
@@ -402,13 +393,14 @@ impl Renderer {
         }
     }
 
-    pub fn draw_empty_sign(&self, cs: &mut ColorSystem, column_index: usize) {
-        cs.set_paint(&self.window, Paint::with_fg_bg(Color::Black, Color::Red).bold());
+    fn draw_empty_sign(&self, cs: &mut ColorSystem, column_index: usize) {
         let (begin, _) = self.display_settings.columns_coord[column_index];
-        mvprintw(&self.window, self.display_settings.entries_display_begin, begin + 1, "empty");
+        const EMPTY_TEXT: &str = "empty";
+        cs.set_paint(&self.window, Paint::with_fg_bg(Color::Black, Color::Red).bold());
+        mvprintw(&self.window, self.display_settings.entries_display_begin, begin + 1, EMPTY_TEXT);
     }
 
-    pub fn draw_column(&self, color_system: &mut ColorSystem, paint: Paint, x: Coord) {
+    fn draw_column_border(&self, color_system: &mut ColorSystem, paint: Paint, x: Coord) {
         color_system.set_paint(&self.window, paint);
         self.window.mv(1, x);
         self.window.addch(ACS_TTEE());
@@ -418,17 +410,9 @@ impl Renderer {
         self.window.addch(ACS_BTEE());
     }
 
-    pub fn maybe_selected_paint_from(paint: Paint, convert: bool) -> Paint {
-        if convert {
-            let Paint {fg, mut bg, bold: _, underlined} = paint;
-            if bg == Color::Default { bg = Color:: Black; }
-            Paint {fg: bg, bg: fg, bold: true, underlined}
-        } else { paint }
-    }
-
     pub fn list_entry(&self, cs: &mut ColorSystem, column_index: usize,
             y: usize, entry: &DirEntry, under_cursor: bool, selected: bool) {
-        let paint = Renderer::maybe_selected_paint_from(entry.paint, under_cursor);
+        let paint = maybe_selected_paint_from(entry.paint, under_cursor);
 
         let y = y as Coord + self.display_settings.entries_display_begin;
         let (mut begin, end) = self.display_settings.columns_coord[column_index];
@@ -436,8 +420,6 @@ impl Renderer {
             cs.set_paint(&self.window, Paint::with_fg_bg(Color::Red, Color::Default));
             self.window.mvaddch(y, begin + 1, ACS_CKBOARD());
             self.window.mvaddch(y, begin + 2, ' ');
-            // cs.set_paint(&self.window, Paint::with_fg_bg(Color::Yellow, Color::Default));
-            // self.window.mvaddch(y, begin + 2, ACS_CKBOARD());
             begin += 2;
         }
         let column_width = end - begin;
@@ -475,89 +457,3 @@ impl Renderer {
         }
     }
 }
-
-fn chars_amount(string: &str) -> usize {
-    string.chars().count()
-}
-
-fn truncate_with_delimiter(string: &str, max_length: Coord) -> String {
-    let chars_amount = chars_amount(&string);
-    if chars_amount > max_length as usize {
-        let delimiter = "...";
-        let leave_at_end = 5;
-        let total_end_len = leave_at_end + delimiter.len();
-        let start = max_length as usize - total_end_len;
-        let end = chars_amount - leave_at_end;
-        replace_range_with(string, start..end, delimiter)
-    } else {
-        string.clone().to_string()
-    }
-}
-
-pub fn maybe_truncate(string: &str, max_length: usize) -> String {
-    let mut result = String::new();
-    let string = string.replace("\r", "^M").replace("\t", "    "); // assume tab_size=4
-    let mut chars = string.chars().take(max_length);
-    while let Some(c) = chars.next() {
-        result.push(c);
-    }
-    result
-}
-
-
-// Does not validate the range
-// May implement in the future: https://crates.io/crates/unicode-segmentation
-fn replace_range_with<R>(string: &str, chars_range: R, replacement: &str) -> String
-        where R: RangeBounds<usize> {
-    use std::ops::Bound::*;
-    let start = match chars_range.start_bound() {
-        Unbounded   => 0,
-        Included(n) => *n,
-        Excluded(n) => *n + 1,
-    };
-    let chars_count = string.chars().count(); // TODO: improve
-    let end = match chars_range.end_bound() {
-        Unbounded   => chars_count,
-        Included(n) => *n + 1,
-        Excluded(n) => *n,
-    };
-
-    let mut chars = string.chars();
-    let mut result = String::new();
-    for _ in 0..start { result.push(chars.next().unwrap()); } // push first part
-    result.push_str(replacement); // push the replacement
-    let mut chars = chars.skip(end - start); // skip this part in the original
-    while let Some(c) = chars.next() { result.push(c); } // push the rest
-    result
-}
-
-// TODO: into utils
-// The display is guaranteed to be able to contain 2*gap (accomplished in settings)
-pub fn siblings_shift_for(gap: usize, max: usize, index: usize,
-                          len: usize, old_shift: Option<usize>) -> usize {
-    let gap   = gap   as Coord;
-    let max   = max   as Coord;
-    let index = index as Coord;
-    let len   = len   as Coord;
-
-    if len <= max         { return 0; }
-    if index < gap        { return 0; }
-    if index >= len - gap { return (len - max) as usize; }
-
-    if let Some(old_shift) = old_shift {
-        let old_shift = old_shift as Coord;
-
-        let shift = index - gap;
-        if shift < old_shift { return shift as usize; }
-        let shift = index + 1 - max + gap;
-        if shift > old_shift { return shift as usize; }
-
-        old_shift as usize
-    } else { // no requirements => let at the top of the screen after the gap
-        let mut shift = index - gap;
-        let left_at_bottom = len - shift - max;
-        if left_at_bottom < 0 { shift += left_at_bottom; }
-        shift as usize
-    }
-}
-
