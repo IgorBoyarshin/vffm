@@ -334,6 +334,17 @@ impl System {
                 *cursor_index -= 1;
             }
         }
+        // XXX: This is a TODO
+        // Not currently implemented because be can only add/remove chars at the
+        // end of the search query as an optimization
+        // } else if let Some(InputMode::Search(SearchTools {cursor_index, ..})) = 
+        //         self.context_mut().input_mode.as_mut() {
+        //     if let Some(cursor_index) = cursor_index {
+        //         if *cursor_index >= 1 {
+        //             *cursor_index -= 1;
+        //         }
+        //     }
+        // }
     }
 
     pub fn move_input_cursor_right(&mut self) {
@@ -347,7 +358,18 @@ impl System {
             if *cursor_index + 1 <= text.len() { // allow one after end of text
                 *cursor_index += 1;
             }
+        // XXX: This is a TODO
+        // Not currently implemented because be can only add/remove chars at the
+        // end of the search query as an optimization
         }
+        // } else if let Some(InputMode::Search(SearchTools {cursor_index, query, ..})) = 
+        //         self.context_mut().input_mode.as_mut() {
+        //     if let Some(cursor_index) = cursor_index {
+        //         if *cursor_index + 1 <= query.len() { // allow one after end of text
+        //             *cursor_index += 1;
+        //         }
+        //     }
+        // }
     }
 
     // Could have been terminated already upon this call => system would have no context
@@ -953,6 +975,7 @@ impl System {
             Some(PInput::Character('\t'))   => Some(Input::Tab),
             Some(PInput::Character('\x1B')) => Some(Input::Escape), // \e === \x1B
             Some(PInput::Character('\x7f')) => Some(Input::Backspace),
+            Some(PInput::KeyBackspace)      => Some(Input::Backspace),
             Some(PInput::Character('\x0a')) => Some(Input::Enter),
             Some(PInput::Character(c))      => Some(Input::Char(c)),
             Some(PInput::KeyBTab)           => Some(Input::ShiftTab),
@@ -968,8 +991,12 @@ impl System {
 
 impl Drop for System {
     fn drop(&mut self) {
-        // ColorSystem::finalize(&self.window);
+        // ColorSystem::finalize(&self.renderer.window);
         endwin();
+        // spawn_process_wait("tput", vec!["reset"]);
+        // std::process::Command::new("tput").args(vec!["reset"])
+            // .stderr(Stdio::null()).stdout(Stdio::null())
+            // .status().expect("failed to execute process");
         println!("Done");
     }
 }

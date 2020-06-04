@@ -101,7 +101,7 @@ pub fn generate_possible_inputs() -> Matches {
     insert(regular("gh"), Command::GoTo("/home/igorek/"));
     insert(regular("gd"), Command::GoTo("/home/igorek/Downloads"));
     insert(regular("gD"), Command::GoTo("/home/igorek/Stuff/dev"));
-    insert(regular("gs"), Command::GoTo("/home/igorek/Semester 8"));
+    insert(regular("gs"), Command::GoTo("/home/igorek/Storage/Studying"));
     insert(regular("gS"), Command::GoTo("/home/igorek/Storage"));
     insert(regular("gT"), Command::GoTo("/home/igorek/Storage/torrents"));
     insert(regular("gc"), Command::GoTo("/home/igorek/screenshots"));
