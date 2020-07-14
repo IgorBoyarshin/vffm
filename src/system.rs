@@ -873,7 +873,8 @@ impl System {
                 self.unsafe_current_entry_mut().is_selected = false;
             } else {
                 // Select
-                self.selected.push(path.clone());
+                let path = path.clone();
+                self.selected.push(path);
                 assert!(!self.unsafe_current_entry_mut().is_selected);
                 self.unsafe_current_entry_mut().is_selected = true;
             }

@@ -173,7 +173,7 @@ pub fn is_symlink(path: &PathBuf) -> bool {
     let meta = path.symlink_metadata(); // Does not resolve the symlink
     if meta.is_err() { return false; }
     let meta = meta.unwrap();
-    (!meta.is_file() && !meta.is_dir())
+    !meta.is_file() && !meta.is_dir()
 }
 
 pub fn is_dir(path: &PathBuf) -> bool {
